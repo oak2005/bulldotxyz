@@ -220,4 +220,36 @@ contract BulldotFactoryTest is Test {
         assertTrue(factory.isOfficialLaunch(tokenAddr), "Launched token must have official verification badge");
         assertFalse(factory.isOfficialLaunch(address(0xDEADBEEF)), "Random token must not have verification badge");
     }
+
+    function test_RevertWhenMaxWalletExceeds100Percent() public {
+        IBulldotFactory.BondingCurveParams memory params = IBulldotFactory.BondingCurveParams({
+            name: "Invalid Cap Token",
+            symbol: "ICT",
+            b20Stock: address(bCOIN),
+            feeRecipient: feeRecipient,
+            creatorFeeBps: 100,
+            maxWalletBps: 10_001 // > 100%
+        });
+
+        vm.prank(creator);
+        vm.expectRevert(BulldotFactory.InvalidMaxWallet.selector);
+        factory.createBondingCurve(params);
+    }
+
+    function test_TokenToCurveMapping() public {
+        IBulldotFactory.BondingCurveParams memory params = IBulldotFactory.BondingCurveParams({
+            name: "Mapped Token",
+            symbol: "MAP",
+            b20Stock: address(bCOIN),
+            feeRecipient: feeRecipient,
+            creatorFeeBps: 100,
+            maxWalletBps: 200
+        });
+
+        vm.prank(creator);
+        (address tokenAddr, address curveAddr) = factory.createBondingCurve(params);
+
+        assertEq(factory.tokenToCurve(tokenAddr), curveAddr, "Factory must accurately map token to curve");
+        assertEq(factory.allTokensCount(), 1, "Factory must accurately track launched tokens count");
+    }
 }

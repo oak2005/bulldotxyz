@@ -48,6 +48,12 @@ contract BulldotFeeVault {
         address indexed newRecipient
     );
 
+    event TokenManagerTransferred(
+        address indexed token,
+        address indexed oldManager,
+        address indexed newManager
+    );
+
     // --- State Variables ---
     address public factory;
 
@@ -110,6 +116,32 @@ contract BulldotFeeVault {
         feeRecipients[token] = newRecipient;
 
         emit FeeRecipientRedirected(token, oldRecipient, newRecipient);
+    }
+
+    /**
+     * @notice Allows token manager to transfer token management rights to a new manager or DAO.
+     */
+    function transferTokenManager(address token, address newManager) external {
+        if (msg.sender != tokenManagers[token]) revert Unauthorized();
+        if (newManager == address(0)) revert ZeroAddress();
+
+        address oldManager = tokenManagers[token];
+        tokenManagers[token] = newManager;
+
+        emit TokenManagerTransferred(token, oldManager, newManager);
+    }
+
+    /**
+     * @notice Allows token manager to irrevocably renounce management.
+     * Prevents any future redirection of fee recipient (e.g. locks redirect to Stock Treasury permanently).
+     */
+    function renounceTokenManager(address token) external {
+        if (msg.sender != tokenManagers[token]) revert Unauthorized();
+
+        address oldManager = tokenManagers[token];
+        tokenManagers[token] = address(0);
+
+        emit TokenManagerTransferred(token, oldManager, address(0));
     }
 
     /**
@@ -180,12 +212,23 @@ contract BulldotFeeVault {
         depositFeeFor(token, stock, msg.sender, rawAmount, autoForward);
     }
 
+    address public constant DEAD_ADDRESS = address(0x000000000000000000000000000000000000dEaD);
+
     /**
-     * @notice Allows fee recipient to claim accumulated B20 stock fees.
+     * @notice Allows fee recipient or manager to claim accumulated B20 stock fees.
+     * ZERO-MAINTENANCE AUTONOMOUS FEATURE:
+     * If fees are redirected to DEAD_ADDRESS (Stock Treasury), ANY caller can trigger
+     * claimFees to permissionlessly burn/lock the stock fees forever.
      */
     function claimFees(address token, address stock) external nonReentrant returns (uint256 claimedRaw) {
         address recipient = feeRecipients[token];
-        if (msg.sender != recipient && msg.sender != tokenManagers[token]) revert Unauthorized();
+
+        // Permissionless execution when destination is Dead address (cannot steal)
+        if (recipient != DEAD_ADDRESS && recipient != address(0)) {
+            if (msg.sender != recipient && msg.sender != tokenManagers[token]) revert Unauthorized();
+        } else {
+            recipient = DEAD_ADDRESS;
+        }
 
         claimedRaw = pendingRawBalance[token][stock];
         if (claimedRaw == 0) revert ZeroAmount();

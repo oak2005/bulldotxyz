@@ -31,6 +31,7 @@ contract BulldotFactory is IBulldotFactory {
     error StockNotVerified();
     error InvalidDepositAmount();
     error CreatorFeeExceedsLimit();
+    error InvalidMaxWallet();
     error TransferFailed();
     error Reentrancy();
 
@@ -58,7 +59,12 @@ contract BulldotFactory is IBulldotFactory {
     // --- Deployed Registries & Official Verification ---
     mapping(address => bool) public override isDeployedCurve;
     mapping(address => bool) public override isOfficialLaunch;
+    mapping(address => address) public override tokenToCurve;
     address[] public allLaunchedTokens;
+
+    function allTokensCount() external view override returns (uint256) {
+        return allLaunchedTokens.length;
+    }
 
     // --- Reentrancy Guard ---
     uint256 private _status = 1;
@@ -249,6 +255,7 @@ contract BulldotFactory is IBulldotFactory {
         if (!isVerifiedB20Stock(params.b20Stock)) revert StockNotVerified();
         if (params.creatorFeeBps > MAX_CREATOR_FEE_BPS) revert CreatorFeeExceedsLimit();
         if (params.feeRecipient == address(0)) revert ZeroAddress();
+        if (params.maxWalletBps > 10_000) revert InvalidMaxWallet();
 
         // 2. Deploy BulldotToken with supply minted to factory for immediate handoff
         BulldotToken token = new BulldotToken(params.name, params.symbol, address(this));
@@ -281,6 +288,7 @@ contract BulldotFactory is IBulldotFactory {
         );
         curveAddr = address(curve);
         isDeployedCurve[curveAddr] = true;
+        tokenToCurve[tokenAddr] = curveAddr;
 
         // 6. Transfer 100% of token supply to the curve
         bool transferSuccess = token.transfer(curveAddr, token.totalSupply());

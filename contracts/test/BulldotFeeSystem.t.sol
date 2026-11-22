@@ -196,5 +196,63 @@ contract BulldotFeeSystemTest is Test {
         assertEq(bCOIN.balanceOf(creator), creatorBefore + 50 * 1e18);
         assertEq(feeVault.pendingRawBalance(token, address(bCOIN)), 0);
     }
+
+    function test_PermissionlessClaimWhenRedirectedToDeadAddress() public {
+        address token = address(0x888);
+        address DEAD_ADDRESS = address(0x000000000000000000000000000000000000dEaD);
+
+        vm.prank(creator);
+        feeVault.registerToken(token, creator, creator);
+
+        // Creator redirects fees to Stock Treasury (Dead address)
+        vm.prank(creator);
+        feeVault.redirectFeeRecipient(token, DEAD_ADDRESS);
+
+        // Accumulate fees in buffer
+        bCOIN.mint(address(this), 25 * 1e18);
+        bCOIN.approve(address(feeVault), type(uint256).max);
+        feeVault.depositFee(token, address(bCOIN), 25 * 1e18, false);
+
+        // ANY random user (e.g. buyer or automated bot) can trigger the claim to Dead address
+        uint256 deadBefore = bCOIN.balanceOf(DEAD_ADDRESS);
+        vm.prank(buyer);
+        uint256 claimed = feeVault.claimFees(token, address(bCOIN));
+
+        assertEq(claimed, 25 * 1e18);
+        assertEq(bCOIN.balanceOf(DEAD_ADDRESS), deadBefore + 25 * 1e18);
+        assertEq(feeVault.pendingRawBalance(token, address(bCOIN)), 0);
+    }
+
+    function test_TransferAndRenounceTokenManager() public {
+        address token = address(0x777);
+        address newManager = address(0x666);
+        address DEAD_ADDRESS = address(0x000000000000000000000000000000000000dEaD);
+
+        vm.prank(creator);
+        feeVault.registerToken(token, creator, creator);
+
+        // Transfer manager to DAO / newManager
+        vm.prank(creator);
+        feeVault.transferTokenManager(token, newManager);
+        assertEq(feeVault.tokenManagers(token), newManager);
+
+        // Old manager cannot redirect anymore
+        vm.prank(creator);
+        vm.expectRevert(BulldotFeeVault.Unauthorized.selector);
+        feeVault.redirectFeeRecipient(token, DEAD_ADDRESS);
+
+        // New manager redirects to DEAD_ADDRESS and renounces
+        vm.prank(newManager);
+        feeVault.redirectFeeRecipient(token, DEAD_ADDRESS);
+
+        vm.prank(newManager);
+        feeVault.renounceTokenManager(token);
+        assertEq(feeVault.tokenManagers(token), address(0));
+
+        // Now fee recipient is permanently locked to Dead address: NO ONE can ever redirect it
+        vm.prank(newManager);
+        vm.expectRevert(BulldotFeeVault.Unauthorized.selector);
+        feeVault.redirectFeeRecipient(token, creator);
+    }
 }
 

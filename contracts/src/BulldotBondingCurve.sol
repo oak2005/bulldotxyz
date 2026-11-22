@@ -289,8 +289,8 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
                 effectiveB20In = maxGrossB20;
                 refundB20 = b20AmountIn - maxGrossB20;
 
-                // Refund excess capital upfront
-                bool refundSuccess = IB20Stock(b20Stock).transfer(recipient, refundB20);
+                // Refund excess capital upfront to payer
+                bool refundSuccess = IB20Stock(b20Stock).transfer(msg.sender, refundB20);
                 if (!refundSuccess) revert TransferFailed();
             }
         }

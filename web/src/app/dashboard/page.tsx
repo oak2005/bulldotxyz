@@ -240,12 +240,21 @@ export default function DashboardPage() {
               <button
                 disabled={!isConnected || isClaiming || currentToken.claimableRaw <= 0}
                 onClick={handleClaim}
-                className="w-full py-2.5 bg-primary hover:bg-primary-hover disabled:bg-surface-hover disabled:text-gray-500 text-white rounded-lg text-xs font-bold transition-colors flex items-center justify-center space-x-1.5"
+                className={`w-full py-2.5 rounded-lg text-xs font-bold transition-colors flex items-center justify-center space-x-1.5 ${
+                  currentToken.isTreasuryRedirected
+                    ? 'bg-amber-600 hover:bg-amber-500 text-white'
+                    : 'bg-primary hover:bg-primary-hover text-white'
+                } disabled:bg-surface-hover disabled:text-gray-500`}
               >
                 {isClaiming ? (
                   <>
                     <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Claiming from Vault...</span>
+                    <span>Processing Vault Forward...</span>
+                  </>
+                ) : currentToken.isTreasuryRedirected ? (
+                  <>
+                    <Flame className="w-3.5 h-3.5" />
+                    <span>Burn to Treasury (Permissionless)</span>
                   </>
                 ) : (
                   <span>Claim B20 Stock Fees</span>
@@ -335,6 +344,31 @@ export default function DashboardPage() {
                 <span>Confirm Fee Redirection</span>
               )}
             </button>
+
+            {/* Renounce Management Option */}
+            <div className="pt-3 border-t border-border/60">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-xs font-semibold text-gray-300 block">Renounce Fee Management</span>
+                  <span className="text-[11px] text-gray-500">Permanently lock this redirect. Neither creator nor admin can ever divert fees.</span>
+                </div>
+                <button
+                  type="button"
+                  disabled={!isConnected || isRedirecting || currentToken.currentRecipient === '0x0000000000000000000000000000000000000000'}
+                  onClick={() => {
+                    setIsRedirecting(true);
+                    setTimeout(() => {
+                      setIsRedirecting(false);
+                      setLastTxHash('0x9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b');
+                      setTimeout(() => setLastTxHash(null), 7000);
+                    }, 1500);
+                  }}
+                  className="px-3 py-1.5 border border-red-800/80 bg-red-950/30 hover:bg-red-900/50 text-red-300 text-xs rounded-lg font-medium transition-all"
+                >
+                  Renounce
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

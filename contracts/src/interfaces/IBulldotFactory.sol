@@ -72,6 +72,8 @@ interface IBulldotFactory {
     function isVerifiedB20Stock(address stock) external view returns (bool);
     function isDeployedCurve(address curve) external view returns (bool);
     function isOfficialLaunch(address token) external view returns (bool);
+    function tokenToCurve(address token) external view returns (address);
+    function allTokensCount() external view returns (uint256);
     function owner() external view returns (address);
 
     function createInstantPool(InstantPoolParams calldata params) external returns (address token, PoolId poolId);
