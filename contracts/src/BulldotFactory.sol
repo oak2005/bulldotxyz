@@ -3,27 +3,26 @@ pragma solidity 0.8.26;
 
 import {IBulldotFactory} from "./interfaces/IBulldotFactory.sol";
 import {IB20Stock} from "./interfaces/IB20Stock.sol";
+import {IB20Registry} from "./interfaces/IB20Registry.sol";
 import {BulldotToken} from "./BulldotToken.sol";
 import {BulldotBondingCurve} from "./BulldotBondingCurve.sol";
+import {BulldotFeeVault} from "./BulldotFeeVault.sol";
 import {PoolKey, PoolId, PoolIdLibrary, IPoolManager, IPositionManager} from "./interfaces/IUniswapV4Minimal.sol";
 
 /**
  * @notice SECURITY NOTES:
  * - BulldotFactory is the core deployment gateway for bulldotxyz on Base.
- * - PAIRING ASSET RESTRICTION: Pairing assets are strictly restricted to verified Coinbase B20 tokenized stocks.
- *   Unverified tokens cannot be used to launch pools.
- * - DUAL LAUNCH MODES:
- *   1. Instant Uniswap v4 Pool: Seeds a permanent pool immediately and burns liquidity to 0xDead.
- *   2. Bonding Curve Mode: Deploys an autonomous curve with automatic migration to Uniswap v4 on completion.
+ * - OFFICIAL B20 REGISTRY PATTERN:
+ *   Supports both the official Coinbase B20 Registry contract and local allowlisting.
+ *   Verified stock status is checked dynamically via `IB20Registry.isVerifiedStock(stock)`.
+ * - FULL FEE SYSTEM & REDIRECTION:
+ *   Integrates with BulldotFeeVault to route creator fees on both Instant and Curve launch modes.
+ *   Enables transparent tracking of raw B20 token fees alongside normalized share values.
  * - PERMANENT LIQUIDITY LOCK: All liquidity created by instant mode or bonding curve graduation is irreversibly
  *   locked to `address(0x000000000000000000000000000000000000dEaD)`. No withdrawal hooks exist anywhere.
- * - REENTRANCY PROTECTION: Checks-effects-interactions order is strictly observed with an explicit
- *   reentrancy guard protecting all state mutations.
- * - MINIMAL LOCKED-DOWN ADMIN: Owner powers are strictly limited to updating the B20 allowlist and setting
- *   the protocol fee recipient. The owner CANNOT withdraw pool funds, pause trading, or alter token supply.
- *   Ownership can be renounced via `renounceOwnership()`, making the factory 100% immutable.
- * - CONFIG-DRIVEN PORTABILITY: Takes PoolManager and PositionManager addresses via constructor, enabling
- *   trivial migration from Base Sepolia (84532) to Base Mainnet (8453) with zero code changes.
+ * - MINIMAL LOCKED-DOWN ADMIN: Owner powers are strictly limited to updating the B20 registry/allowlist
+ *   and protocol fee recipient. Owner CANNOT touch user funds, pause trading, or alter token supply.
+ *   Ownership can be renounced via `renounceOwnership()`.
  */
 contract BulldotFactory is IBulldotFactory {
     using PoolIdLibrary for PoolKey;
@@ -48,9 +47,11 @@ contract BulldotFactory is IBulldotFactory {
     address public immutable override poolManager;
     address public immutable override positionManager;
     address public override protocolFeeRecipient;
+    address public override feeVault;
+    address public override b20Registry;
 
     // --- B20 Stock Allowlist ---
-    mapping(address => bool) public override isVerifiedB20Stock;
+    mapping(address => bool) public isVerifiedB20StockMapping;
 
     // --- Deployed Registries ---
     mapping(address => bool) public override isDeployedCurve;
@@ -74,6 +75,8 @@ contract BulldotFactory is IBulldotFactory {
         address _poolManager,
         address _positionManager,
         address _protocolFeeRecipient,
+        address _feeVault,
+        address _b20Registry,
         address[] memory _initialVerifiedStocks
     ) {
         if (_poolManager == address(0)) revert ZeroAddress();
@@ -83,13 +86,30 @@ contract BulldotFactory is IBulldotFactory {
         positionManager = _positionManager;
         protocolFeeRecipient = _protocolFeeRecipient == address(0) ? msg.sender : _protocolFeeRecipient;
 
+        // Deploy default fee vault if none provided
+        feeVault = _feeVault == address(0) ? address(new BulldotFeeVault()) : _feeVault;
+        b20Registry = _b20Registry;
+
         for (uint256 i = 0; i < _initialVerifiedStocks.length; i++) {
             address stock = _initialVerifiedStocks[i];
             if (stock != address(0)) {
-                isVerifiedB20Stock[stock] = true;
+                isVerifiedB20StockMapping[stock] = true;
                 emit B20StockVerificationUpdated(stock, true);
             }
         }
+    }
+
+    /**
+     * @notice Checks whether a token is verified B20 stock via local allowlist or official B20 registry.
+     */
+    function isVerifiedB20Stock(address stock) public view override returns (bool) {
+        if (isVerifiedB20StockMapping[stock]) return true;
+        if (b20Registry != address(0)) {
+            try IB20Registry(b20Registry).isVerifiedStock(stock) returns (bool verified) {
+                return verified;
+            } catch {}
+        }
+        return false;
     }
 
     /**
@@ -102,7 +122,7 @@ contract BulldotFactory is IBulldotFactory {
         returns (address tokenAddr, PoolId poolId)
     {
         // 1. Validation
-        if (!isVerifiedB20Stock[params.b20Stock]) revert StockNotVerified();
+        if (!isVerifiedB20Stock(params.b20Stock)) revert StockNotVerified();
         if (params.b20Amount == 0) revert InvalidDepositAmount();
         if (params.creatorFeeBps > MAX_CREATOR_FEE_BPS) revert CreatorFeeExceedsLimit();
         if (params.feeRecipient == address(0)) revert ZeroAddress();
@@ -115,20 +135,29 @@ contract BulldotFactory is IBulldotFactory {
         );
         if (!pullSuccess) revert TransferFailed();
 
-        // 3. Handle Creator Fee (if configured)
-        uint256 creatorFee = (params.b20Amount * params.creatorFeeBps) / 10_000;
-        uint256 netB20ForPool = params.b20Amount - creatorFee;
-
-        if (creatorFee > 0) {
-            bool feeSuccess = IB20Stock(params.b20Stock).transfer(params.feeRecipient, creatorFee);
-            if (!feeSuccess) revert TransferFailed();
-            emit CreatorFeeCollected(address(0), params.b20Stock, params.feeRecipient, creatorFee);
-        }
-
-        // 4. Deploy fixed-supply BulldotToken (1 Billion supply minted 100% to this factory)
+        // 3. Deploy fixed-supply BulldotToken (1 Billion supply minted 100% to this factory)
         BulldotToken token = new BulldotToken(params.name, params.symbol, address(this));
         tokenAddr = address(token);
         allLaunchedTokens.push(tokenAddr);
+
+        // 4. Handle Creator Fee & FeeVault registration
+        uint256 creatorFee = (params.b20Amount * params.creatorFeeBps) / 10_000;
+        uint256 netB20ForPool = params.b20Amount - creatorFee;
+
+        if (feeVault != address(0)) {
+            BulldotFeeVault(feeVault).registerToken(tokenAddr, params.feeRecipient, msg.sender);
+        }
+
+        if (creatorFee > 0) {
+            if (feeVault != address(0)) {
+                IB20Stock(params.b20Stock).approve(feeVault, creatorFee);
+                BulldotFeeVault(feeVault).depositFee(tokenAddr, params.b20Stock, creatorFee, true);
+            } else {
+                bool feeSuccess = IB20Stock(params.b20Stock).transfer(params.feeRecipient, creatorFee);
+                if (!feeSuccess) revert TransferFailed();
+            }
+            emit CreatorFeeCollected(tokenAddr, params.b20Stock, params.feeRecipient, creatorFee);
+        }
 
         uint256 tokenAmountForPool = token.totalSupply();
 
@@ -178,7 +207,6 @@ contract BulldotFactory is IBulldotFactory {
 
     /**
      * @notice Launch Mode 2: Launch a new token with an autonomous bonding curve paired with a verified B20 stock.
-     * @dev Automatically seeds curve with 100% of newly minted token supply.
      */
     function createBondingCurve(BondingCurveParams calldata params)
         external
@@ -187,7 +215,7 @@ contract BulldotFactory is IBulldotFactory {
         returns (address tokenAddr, address curveAddr)
     {
         // 1. Validation
-        if (!isVerifiedB20Stock[params.b20Stock]) revert StockNotVerified();
+        if (!isVerifiedB20Stock(params.b20Stock)) revert StockNotVerified();
         if (params.creatorFeeBps > MAX_CREATOR_FEE_BPS) revert CreatorFeeExceedsLimit();
         if (params.feeRecipient == address(0)) revert ZeroAddress();
 
@@ -196,16 +224,22 @@ contract BulldotFactory is IBulldotFactory {
         tokenAddr = address(token);
         allLaunchedTokens.push(tokenAddr);
 
-        // 3. Canonical target: 50 canonical shares
+        // 3. Register token with FeeVault
+        if (feeVault != address(0)) {
+            BulldotFeeVault(feeVault).registerToken(tokenAddr, params.feeRecipient, msg.sender);
+        }
+
+        // 4. Canonical target: 50 canonical shares
         uint256 targetShares = 50 * 1e18;
 
-        // 4. Deploy BulldotBondingCurve
+        // 5. Deploy BulldotBondingCurve with FeeVault integration
         BulldotBondingCurve curve = new BulldotBondingCurve(
             tokenAddr,
             params.b20Stock,
             msg.sender,
             params.feeRecipient,
             protocolFeeRecipient,
+            feeVault,
             params.creatorFeeBps,
             0, // Default protocol fee
             targetShares,
@@ -215,11 +249,11 @@ contract BulldotFactory is IBulldotFactory {
         curveAddr = address(curve);
         isDeployedCurve[curveAddr] = true;
 
-        // 5. Transfer 100% of token supply to the curve
+        // 6. Transfer 100% of token supply to the curve
         bool transferSuccess = token.transfer(curveAddr, token.totalSupply());
         if (!transferSuccess) revert TransferFailed();
 
-        // 6. Emit clean event for indexing
+        // 7. Emit clean event for indexing
         emit BondingCurveLaunched(
             tokenAddr,
             curveAddr,
@@ -254,9 +288,14 @@ contract BulldotFactory is IBulldotFactory {
 
     // --- Minimal Admin Functions ---
 
+    function setB20Registry(address newRegistry) external override onlyOwner {
+        emit B20RegistryUpdated(b20Registry, newRegistry);
+        b20Registry = newRegistry;
+    }
+
     function setB20StockVerification(address stock, bool isVerified) external override onlyOwner {
         if (stock == address(0)) revert ZeroAddress();
-        isVerifiedB20Stock[stock] = isVerified;
+        isVerifiedB20StockMapping[stock] = isVerified;
         emit B20StockVerificationUpdated(stock, isVerified);
     }
 

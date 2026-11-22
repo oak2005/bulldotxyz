@@ -6,6 +6,8 @@
     "positionManager": "0x7C40c31F41609b77Ecdc5222E42b8e3a2B79A63f",
     "permit2": "0x000000000022D473030F116dDEE9F6B43aC78BA3"
   },
+  "b20Registry": "0x0000000000000000000000000000000000000000",
+  "feeVault": "0x0000000000000000000000000000000000000000",
   "verifiedB20Stocks": [
     {
       "symbol": "bCOIN",
@@ -22,6 +24,5 @@
   ],
   "graduationThresholdShares": "50000000000000000000",
   "protocolFeeBps": 50,
-  "maxCreatorFeeBps": 200
+  "maxCreatorFeeBps": 250
 }
-

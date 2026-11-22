@@ -5,6 +5,7 @@ import {Test, console2} from "forge-std/Test.sol";
 import {BulldotFactory} from "../src/BulldotFactory.sol";
 import {BulldotBondingCurve} from "../src/BulldotBondingCurve.sol";
 import {BulldotToken} from "../src/BulldotToken.sol";
+import {BulldotFeeVault} from "../src/BulldotFeeVault.sol";
 import {MockB20Stock} from "../src/mocks/MockB20Stock.sol";
 import {MockUniswapV4PoolManager} from "../src/mocks/MockUniswapV4PoolManager.sol";
 import {IBulldotFactory} from "../src/interfaces/IBulldotFactory.sol";
@@ -15,6 +16,7 @@ contract BulldotFactoryTest is Test {
     MockUniswapV4PoolManager public poolManager;
     MockB20Stock public bCOIN;
     MockB20Stock public unverifiedStock;
+    BulldotFeeVault public feeVault;
 
     address public owner = address(0xAAAA);
     address public creator = address(0xBBBB);
@@ -27,27 +29,25 @@ contract BulldotFactoryTest is Test {
     function setUp() public {
         vm.startPrank(owner);
 
-        // 1. Deploy Mock Uniswap v4 PoolManager
         poolManager = new MockUniswapV4PoolManager();
-
-        // 2. Deploy Mock B20 Stock (bCOIN)
         bCOIN = new MockB20Stock("Coinbase Tokenized Stock", "bCOIN");
         unverifiedStock = new MockB20Stock("Unverified Token", "FAKE");
+        feeVault = new BulldotFeeVault();
 
-        // 3. Deploy Factory with bCOIN verified
         address[] memory verifiedList = new address[](1);
         verifiedList[0] = address(bCOIN);
 
         factory = new BulldotFactory(
             address(poolManager),
-            address(0), // PositionManager optional for MVP
+            address(0),
             protocolFeeRecipient,
+            address(feeVault),
+            address(0), // No registry for base factory test
             verifiedList
         );
 
         vm.stopPrank();
 
-        // Fund creator & buyer with bCOIN
         bCOIN.mint(creator, 500 * 1e18);
         bCOIN.mint(buyer, 500 * 1e18);
         unverifiedStock.mint(creator, 100 * 1e18);
@@ -116,15 +116,12 @@ contract BulldotFactoryTest is Test {
         assertTrue(tokenAddr != address(0), "Token address should be valid");
         assertTrue(PoolId.unwrap(poolId) != bytes32(0), "PoolId should be non-zero");
 
-        // Verify creator fee paid out immediately
         assertEq(bCOIN.balanceOf(feeRecipient), expectedCreatorFee, "Creator fee should be delivered");
 
-        // Verify liquidity permanently locked to Dead Address (0xdEaD)
         address deadAddress = address(0x000000000000000000000000000000000000dEaD);
         assertEq(bCOIN.balanceOf(deadAddress), expectedNetB20, "Net B20 must be locked in Dead address");
         assertEq(BulldotToken(tokenAddr).balanceOf(deadAddress), 1_000_000_000 * 1e18, "100% token supply locked in Dead address");
 
-        // Verify factory balance is zero
         assertEq(bCOIN.balanceOf(address(factory)), 0, "Factory should hold zero B20");
         assertEq(BulldotToken(tokenAddr).balanceOf(address(factory)), 0, "Factory should hold zero tokens");
 
@@ -142,7 +139,6 @@ contract BulldotFactoryTest is Test {
             creatorFeeBps: creatorFeeBps
         });
 
-        // 1. Launch Bonding Curve via Factory
         vm.prank(creator);
         (address tokenAddr, address curveAddr) = factory.createBondingCurve(params);
 
@@ -153,7 +149,6 @@ contract BulldotFactoryTest is Test {
 
         BulldotBondingCurve curve = BulldotBondingCurve(curveAddr);
 
-        // 2. Buy on curve during bonding phase -> verifies creator fees
         uint256 buyAmount = 10 * 1e18; // 10 bCOIN
         vm.prank(buyer);
         bCOIN.approve(curveAddr, type(uint256).max);
@@ -167,21 +162,16 @@ contract BulldotFactoryTest is Test {
         uint256 expectedCreatorFee = (buyAmount * creatorFeeBps) / 10_000;
         assertEq(bCOIN.balanceOf(feeRecipient), feeRecipientBefore + expectedCreatorFee, "Creator fee must be paid on buy");
 
-        // 3. Trade up to graduation target (targetShares = 50 * 1e18)
-        // Buyer buys remaining shares needed to graduate
         uint256 remainingB20Needed = 60 * 1e18;
         vm.prank(buyer);
         curve.buy(remainingB20Needed, 0, buyer);
 
-        // 4. Verify Automatic Migration occurred
         assertTrue(curve.isGraduated(), "Curve must be automatically graduated");
 
-        // Verify permanent liquidity lock to Dead address
         address dead = address(0x000000000000000000000000000000000000dEaD);
         assertTrue(bCOIN.balanceOf(dead) > 0, "B20 reserves must be locked in Dead address");
         assertTrue(BulldotToken(tokenAddr).balanceOf(dead) > 0, "Token reserves must be locked in Dead address");
 
-        // Curve contract holds zero reserves post-graduation
         assertEq(bCOIN.balanceOf(curveAddr), 0, "Curve B20 balance must be zero");
         assertEq(BulldotToken(tokenAddr).balanceOf(curveAddr), 0, "Curve token balance must be zero");
     }
@@ -190,7 +180,6 @@ contract BulldotFactoryTest is Test {
         assertEq(bCOIN.multiplier(), 1e18);
         assertEq(bCOIN.tokensToShares(10 * 1e18), 10 * 1e18);
 
-        // Simulate a 4-for-1 forward stock split
         bCOIN.simulateStockSplit(4e18);
 
         assertEq(bCOIN.multiplier(), 4e18);

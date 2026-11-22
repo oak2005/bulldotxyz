@@ -3,6 +3,7 @@ pragma solidity 0.8.26;
 
 import {IB20Stock} from "./interfaces/IB20Stock.sol";
 import {BulldotToken} from "./BulldotToken.sol";
+import {BulldotFeeVault} from "./BulldotFeeVault.sol";
 import {IBulldotBondingCurve} from "./interfaces/IBulldotBondingCurve.sol";
 import {PoolKey, PoolId, PoolIdLibrary, IPoolManager} from "./interfaces/IUniswapV4Minimal.sol";
 
@@ -13,15 +14,15 @@ import {PoolKey, PoolId, PoolIdLibrary, IPoolManager} from "./interfaces/IUniswa
  *   Bonding curve progress and graduation target are denominated in canonical underlying shares
  *   via `tokensToShares()`. Corporate stock splits update the multiplier dynamically; share-denominated
  *   accounting ensures that splits cannot drain reserves or distort graduation pricing.
+ * - FULL FEE SYSTEM & REDIRECTION:
+ *   Integrates with BulldotFeeVault for transparent on-chain accounting in both raw B20 and canonical shares.
+ *   Creator fees are deducted on every buy/sell and can be redirected to stock treasuries or holders.
  * - ZERO-MONITORING AUTOMATED MIGRATION:
  *   Graduation triggers automatically inside the trade that completes the curve, with a permissionless
  *   fallback `graduate()` function. No off-chain keepers or administrative intervention required.
  * - PERMANENT LIQUIDITY LOCK:
  *   Upon graduation, 100% of collected B20 tokens and remaining token reserves are paired,
  *   initialized in Uniswap v4, and permanently locked to `0x000000000000000000000000000000000000dEaD`.
- * - REENTRANCY PROTECTION: Checks-effects-interactions strictly enforced with a reentrancy guard.
- * - CREATOR FEES: Collected on every buy/sell during the bonding phase and transferred directly
- *   to `feeRecipient`. Fee is hardcapped at 2.5% max (250 bps).
  */
 contract BulldotBondingCurve is IBulldotBondingCurve {
     using PoolIdLibrary for PoolKey;
@@ -43,6 +44,7 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
     address public immutable override b20Stock;
     address public immutable override creator;
     address public immutable protocolFeeRecipient;
+    BulldotFeeVault public immutable feeVault;
     address public override feeRecipient;
 
     uint256 public immutable override creatorFeeBps;
@@ -64,6 +66,10 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
     uint256 public override totalSharesAccumulated;
     bool public override isGraduated;
 
+    // Cumulative on-chain fee metrics
+    uint256 public totalCreatorFeesCollectedRaw;
+    uint256 public totalCreatorFeesCollectedShares;
+
     // Uniswap v4 Coordinates
     address public immutable poolManager;
     address public immutable positionManager;
@@ -83,6 +89,7 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
         address _creator,
         address _feeRecipient,
         address _protocolFeeRecipient,
+        address _feeVault,
         uint256 _creatorFeeBps,
         uint256 _protocolFeeBps,
         uint256 _targetShares,
@@ -97,6 +104,7 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
         creator = _creator;
         feeRecipient = _feeRecipient == address(0) ? _creator : _feeRecipient;
         protocolFeeRecipient = _protocolFeeRecipient;
+        feeVault = BulldotFeeVault(_feeVault);
         creatorFeeBps = _creatorFeeBps;
         protocolFeeBps = _protocolFeeBps;
         targetShares = _targetShares;
@@ -109,19 +117,20 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
     }
 
     /**
-     * @notice Allows creator to update fee recipient (e.g. to a DAO or treasury).
+     * @notice Allows creator to update fee recipient or redirect to a stock treasury / DAO.
      */
     function setFeeRecipient(address newRecipient) external {
         if (msg.sender != creator) revert Reentrancy();
         if (newRecipient == address(0)) revert ZeroAddress();
         feeRecipient = newRecipient;
+
+        if (address(feeVault) != address(0)) {
+            try feeVault.redirectFeeRecipient(token, newRecipient) {} catch {}
+        }
     }
 
     /**
      * @notice Buy tokens using B20 stock tokens.
-     * @param b20AmountIn Total B20 tokens deposited by caller.
-     * @param minTokensOut Minimum tokens expected (slippage protection).
-     * @param recipient Address to receive purchased tokens.
      */
     function buy(
         uint256 b20AmountIn,
@@ -136,16 +145,13 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
         bool pullSuccess = IB20Stock(b20Stock).transferFrom(msg.sender, address(this), b20AmountIn);
         if (!pullSuccess) revert TransferFailed();
 
-        // 2. Calculate and distribute fees immediately
+        // 2. Calculate and distribute fees with transparent tracking
         uint256 creatorFee = (b20AmountIn * creatorFeeBps) / 10_000;
         uint256 protocolFee = (b20AmountIn * protocolFeeBps) / 10_000;
         uint256 netB20 = b20AmountIn - creatorFee - protocolFee;
 
-        if (creatorFee > 0) {
-            bool feeSuccess = IB20Stock(b20Stock).transfer(feeRecipient, creatorFee);
-            if (!feeSuccess) revert TransferFailed();
-            emit CreatorFeeCollected(token, feeRecipient, creatorFee);
-        }
+        _processCreatorFee(creatorFee);
+
         if (protocolFee > 0 && protocolFeeRecipient != address(0)) {
             bool protoFeeSuccess = IB20Stock(b20Stock).transfer(protocolFeeRecipient, protocolFee);
             if (!protoFeeSuccess) revert TransferFailed();
@@ -243,11 +249,8 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
         }
 
         // 4. Distribute fees & payout B20 to seller
-        if (creatorFee > 0) {
-            bool feeSuccess = IB20Stock(b20Stock).transfer(feeRecipient, creatorFee);
-            if (!feeSuccess) revert TransferFailed();
-            emit CreatorFeeCollected(token, feeRecipient, creatorFee);
-        }
+        _processCreatorFee(creatorFee);
+
         if (protocolFee > 0 && protocolFeeRecipient != address(0)) {
             bool protoFeeSuccess = IB20Stock(b20Stock).transfer(protocolFeeRecipient, protocolFee);
             if (!protoFeeSuccess) revert TransferFailed();
@@ -257,6 +260,28 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
         if (!payoutSuccess) revert TransferFailed();
 
         emit TokensSold(msg.sender, recipient, tokenAmountIn, b20Out, creatorFee + protocolFee);
+    }
+
+    /**
+     * @dev Routes creator fee through BulldotFeeVault if available, else direct transfer.
+     */
+    function _processCreatorFee(uint256 creatorFee) internal {
+        if (creatorFee == 0) return;
+
+        uint256 shareFee = IB20Stock(b20Stock).tokensToShares(creatorFee);
+        totalCreatorFeesCollectedRaw += creatorFee;
+        totalCreatorFeesCollectedShares += shareFee;
+
+        if (address(feeVault) != address(0)) {
+            IB20Stock(b20Stock).approve(address(feeVault), creatorFee);
+            try feeVault.depositFeeFor(token, b20Stock, feeRecipient, creatorFee, true) {
+                return;
+            } catch {}
+        }
+
+        bool feeSuccess = IB20Stock(b20Stock).transfer(feeRecipient, creatorFee);
+        if (!feeSuccess) revert TransferFailed();
+        emit CreatorFeeCollected(token, feeRecipient, creatorFee);
     }
 
     /**

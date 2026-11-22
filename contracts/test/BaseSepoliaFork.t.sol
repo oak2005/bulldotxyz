@@ -5,21 +5,16 @@ import {Test, console2} from "forge-std/Test.sol";
 import {BulldotFactory} from "../src/BulldotFactory.sol";
 import {BulldotBondingCurve} from "../src/BulldotBondingCurve.sol";
 import {BulldotToken} from "../src/BulldotToken.sol";
+import {BulldotFeeVault} from "../src/BulldotFeeVault.sol";
 import {MockB20Stock} from "../src/mocks/MockB20Stock.sol";
 import {IBulldotFactory} from "../src/interfaces/IBulldotFactory.sol";
 import {PoolId} from "../src/interfaces/IUniswapV4Minimal.sol";
 
-/**
- * @notice SECURITY NOTES:
- * - Base Sepolia Fork Test (Chain ID: 84532).
- * - Verifies interaction with the live Uniswap v4 PoolManager deployed at
- *   0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408 on Base Sepolia.
- * - Tests both Launch Mode 1 (Instant Pool) and Launch Mode 2 (Bonding Curve + Auto-Migration).
- */
 contract BaseSepoliaForkTest is Test {
     address public constant BASE_SEPOLIA_POOL_MANAGER = 0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408;
 
     BulldotFactory public factory;
+    BulldotFeeVault public feeVault;
     MockB20Stock public bCOIN;
 
     address public owner = address(0xA1);
@@ -41,10 +36,9 @@ contract BaseSepoliaForkTest is Test {
 
         vm.startPrank(owner);
 
-        // 1. Deploy mock B20 stock
         bCOIN = new MockB20Stock("Coinbase Tokenized Stock", "bCOIN");
+        feeVault = new BulldotFeeVault();
 
-        // 2. Deploy BulldotFactory pointing to LIVE Base Sepolia PoolManager
         address[] memory initialStocks = new address[](1);
         initialStocks[0] = address(bCOIN);
 
@@ -52,12 +46,13 @@ contract BaseSepoliaForkTest is Test {
             BASE_SEPOLIA_POOL_MANAGER,
             address(0),
             owner,
+            address(feeVault),
+            address(0),
             initialStocks
         );
 
         vm.stopPrank();
 
-        // Mint B20 stock to creator and buyer
         bCOIN.mint(creator, 500 * 1e18);
         bCOIN.mint(buyer, 500 * 1e18);
 
@@ -107,10 +102,8 @@ contract BaseSepoliaForkTest is Test {
         assertTrue(tokenAddr != address(0), "Token must be deployed");
         assertTrue(PoolId.unwrap(poolId) != bytes32(0), "PoolId must be valid");
 
-        // Verify fee collection
         assertEq(bCOIN.balanceOf(feeRecipient), expectedCreatorFee);
 
-        // Verify permanent lock to Dead address
         address dead = address(0x000000000000000000000000000000000000dEaD);
         assertEq(bCOIN.balanceOf(dead), expectedNetB20);
         assertEq(BulldotToken(tokenAddr).balanceOf(dead), 1_000_000_000 * 1e18);
@@ -132,7 +125,6 @@ contract BaseSepoliaForkTest is Test {
             creatorFeeBps: creatorFeeBps
         });
 
-        // 1. Launch Curve via Factory
         vm.prank(creator);
         (address tokenAddr, address curveAddr) = factory.createBondingCurve(params);
 
@@ -141,22 +133,16 @@ contract BaseSepoliaForkTest is Test {
 
         BulldotBondingCurve curve = BulldotBondingCurve(curveAddr);
 
-        // 2. Buy and trade on live fork
         vm.prank(buyer);
         bCOIN.approve(curveAddr, type(uint256).max);
 
-        // Buy 70 bCOIN to reach graduation threshold
         vm.prank(buyer);
         curve.buy(70 * 1e18, 0, buyer);
 
-        // 3. Verify automatic migration executed on live PoolManager
         assertTrue(curve.isGraduated(), "Curve must auto-graduate on live fork");
 
-        // Verify permanent lock to dead address
         address dead = address(0x000000000000000000000000000000000000dEaD);
         assertTrue(bCOIN.balanceOf(dead) > 0);
         assertTrue(BulldotToken(tokenAddr).balanceOf(dead) > 0);
-
-        console2.log("Bonding curve successfully auto-migrated to live Uniswap v4 on Base Sepolia!");
     }
 }
