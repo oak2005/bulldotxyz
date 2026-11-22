@@ -19,7 +19,7 @@ contract ConfigHelper is Script {
         uint256 maxCreatorFeeBps;
     }
 
-    function getNetworkConfig() public returns (NetworkConfig memory config) {
+    function getNetworkConfig() public view returns (NetworkConfig memory config) {
         uint256 chainId = block.chainid;
         string memory root = vm.projectRoot();
         string memory path = string.concat(root, "/config/", vm.toString(chainId), ".json");

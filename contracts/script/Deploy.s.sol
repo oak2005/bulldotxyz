@@ -5,6 +5,7 @@ import {Script, console2} from "forge-std/Script.sol";
 import {stdJson} from "forge-std/StdJson.sol";
 import {BulldotFactory} from "../src/BulldotFactory.sol";
 import {BulldotFeeVault} from "../src/BulldotFeeVault.sol";
+import {BulldotRouter} from "../src/BulldotRouter.sol";
 import {MockB20Stock} from "../src/mocks/MockB20Stock.sol";
 import {MockB20Registry} from "../src/mocks/MockB20Registry.sol";
 
@@ -50,10 +51,13 @@ contract DeployScript is Script {
             }
         }
 
+        BulldotFeeVault vault;
         if (feeVault == address(0)) {
-            BulldotFeeVault vault = new BulldotFeeVault();
+            vault = new BulldotFeeVault();
             feeVault = address(vault);
             console2.log("BulldotFeeVault deployed at:", feeVault);
+        } else {
+            vault = BulldotFeeVault(feeVault);
         }
 
         BulldotFactory factory = new BulldotFactory(
@@ -66,6 +70,22 @@ contract DeployScript is Script {
         );
 
         console2.log("BulldotFactory deployed successfully at:", address(factory));
+
+        // Connect FeeVault to Factory
+        vault.setFactory(address(factory));
+        console2.log("BulldotFeeVault connected to Factory");
+
+        // Deploy Unified Router
+        BulldotRouter router = new BulldotRouter(address(factory), poolManager);
+        console2.log("BulldotRouter deployed successfully at:", address(router));
+
+        console2.log("=== DEPLOYMENT SUMMARY ===");
+        console2.log("Network:", chainId);
+        console2.log("Factory:", address(factory));
+        console2.log("Router:", address(router));
+        console2.log("FeeVault:", feeVault);
+        console2.log("B20Registry:", b20Registry);
+        console2.log("PoolManager:", poolManager);
 
         vm.stopBroadcast();
     }

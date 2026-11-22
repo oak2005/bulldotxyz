@@ -443,10 +443,23 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
         uint256 b20Balance = IB20Stock(b20Stock).balanceOf(address(this));
         uint256 tokenBalance = BulldotToken(token).balanceOf(address(this));
 
-        // Construct sorted Uniswap v4 PoolKey
-        (address currency0, address currency1, bool isTokenCurrency0) = token < b20Stock
-            ? (token, b20Stock, true)
-            : (b20Stock, token, false);
+        // Construct sorted Uniswap v4 PoolKey and amounts
+        address currency0;
+        address currency1;
+        uint256 amount0;
+        uint256 amount1;
+
+        if (token < b20Stock) {
+            currency0 = token;
+            currency1 = b20Stock;
+            amount0 = tokenBalance;
+            amount1 = b20Balance;
+        } else {
+            currency0 = b20Stock;
+            currency1 = token;
+            amount0 = b20Balance;
+            amount1 = tokenBalance;
+        }
 
         PoolKey memory key = PoolKey({
             currency0: currency0,
@@ -457,10 +470,6 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
         });
 
         bytes32 poolId = PoolId.unwrap(key.toId());
-
-        (uint256 amount0, uint256 amount1) = isTokenCurrency0
-            ? (tokenBalance, b20Balance)
-            : (b20Balance, tokenBalance);
 
         uint160 sqrtPriceX96 = calculateSqrtPriceX96(amount0, amount1);
 

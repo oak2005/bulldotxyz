@@ -174,10 +174,23 @@ contract BulldotFactory is IBulldotFactory {
 
         uint256 tokenAmountForPool = token.totalSupply();
 
-        // 5. Construct Sorted Uniswap v4 PoolKey
-        (address currency0, address currency1, bool isTokenCurrency0) = tokenAddr < params.b20Stock
-            ? (tokenAddr, params.b20Stock, true)
-            : (params.b20Stock, tokenAddr, false);
+        // 5. Construct Sorted Uniswap v4 PoolKey and amounts
+        address currency0;
+        address currency1;
+        uint256 amount0;
+        uint256 amount1;
+
+        if (tokenAddr < params.b20Stock) {
+            currency0 = tokenAddr;
+            currency1 = params.b20Stock;
+            amount0 = tokenAmountForPool;
+            amount1 = netB20ForPool;
+        } else {
+            currency0 = params.b20Stock;
+            currency1 = tokenAddr;
+            amount0 = netB20ForPool;
+            amount1 = tokenAmountForPool;
+        }
 
         PoolKey memory key = PoolKey({
             currency0: currency0,
@@ -190,9 +203,6 @@ contract BulldotFactory is IBulldotFactory {
         poolId = key.toId();
 
         // 6. Calculate initial sqrtPriceX96
-        (uint256 amount0, uint256 amount1) = isTokenCurrency0
-            ? (tokenAmountForPool, netB20ForPool)
-            : (netB20ForPool, tokenAmountForPool);
 
         uint160 sqrtPriceX96 = calculateSqrtPriceX96(amount0, amount1);
 

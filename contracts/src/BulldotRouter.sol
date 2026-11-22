@@ -231,14 +231,16 @@ contract BulldotRouter is IUnlockCallback {
         uint256 tokenOutBal = BulldotToken(tokenOut).balanceOf(address(this));
         if (tokenOutBal > 0) {
             amountOut = tokenOutBal;
-            BulldotToken(tokenOut).transfer(recipient, tokenOutBal);
+            bool ok = BulldotToken(tokenOut).transfer(recipient, tokenOutBal);
+            if (!ok) revert TransferFailed();
         }
 
         // If swap failed to deliver minAmountOut, refund tokenIn to user and revert
         if (amountOut < minAmountOut) {
             uint256 remainingIn = BulldotToken(tokenIn).balanceOf(address(this));
             if (remainingIn > 0) {
-                BulldotToken(tokenIn).transfer(msg.sender, remainingIn);
+                bool okIn = BulldotToken(tokenIn).transfer(msg.sender, remainingIn);
+                if (!okIn) revert TransferFailed();
             }
             revert SlippageExceeded();
         }
