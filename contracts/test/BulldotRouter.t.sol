@@ -78,6 +78,30 @@ contract BulldotRouterTest is Test {
         assertEq(BulldotToken(tokenAddr).balanceOf(buyer), tokensOut);
     }
 
+    function test_RouterGetQuote() public {
+        IBulldotFactory.BondingCurveParams memory params = IBulldotFactory.BondingCurveParams({
+            name: "Router Test Token",
+            symbol: "RTT",
+            b20Stock: address(bCOIN),
+            feeRecipient: creator,
+            creatorFeeBps: 100
+        });
+
+        vm.prank(creator);
+        (, address curveAddr) = factory.createBondingCurve(params);
+
+        uint256 b20Input = 2 * 1e18; // 2 bCOIN
+        (uint256 expectedTokensOut, uint256 fee, uint256 priceImpactBps) = router.getQuote(
+            curveAddr,
+            b20Input,
+            false
+        );
+
+        assertTrue(expectedTokensOut > 0, "Quote should return positive output");
+        assertTrue(fee > 0, "Fee should be non-zero");
+        assertTrue(priceImpactBps > 0, "Price impact should be positive for realistic input");
+    }
+
     function test_RouterRevertOnExpiredDeadline() public {
         IBulldotFactory.BondingCurveParams memory params = IBulldotFactory.BondingCurveParams({
             name: "Router Test Token",

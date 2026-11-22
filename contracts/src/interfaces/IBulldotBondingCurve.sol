@@ -5,6 +5,7 @@ pragma solidity 0.8.26;
  * @notice SECURITY NOTES:
  * - Interface for BulldotBondingCurve: autonomous AMM paired with Coinbase B20 tokenized stock.
  * - Handles creator fees during the bonding phase and triggers graduation once targetShares is reached.
+ * - Provides view methods for DEX quotes, liquidity metrics, and simulation without state mutation.
  */
 interface IBulldotBondingCurve {
     event TokensPurchased(
@@ -46,8 +47,38 @@ interface IBulldotBondingCurve {
     function targetShares() external view returns (uint256);
     function totalSharesAccumulated() external view returns (uint256);
     function isGraduated() external view returns (bool);
+    function virtualSharesReserve() external view returns (uint256);
+    function virtualTokenReserve() external view returns (uint256);
 
     function buy(uint256 b20AmountIn, uint256 minTokensOut, address recipient) external returns (uint256 tokensOut);
     function sell(uint256 tokenAmountIn, uint256 minB20Out, address recipient) external returns (uint256 b20Out);
     function graduate() external;
+
+    function getAmountOutForBuy(uint256 b20AmountIn)
+        external
+        view
+        returns (
+            uint256 tokensOut,
+            uint256 effectiveB20In,
+            uint256 refundB20,
+            uint256 fee
+        );
+
+    function getAmountOutForSell(uint256 tokenAmountIn)
+        external
+        view
+        returns (uint256 b20Out, uint256 fee);
+
+    function getPoolLiquidity()
+        external
+        view
+        returns (
+            uint256 rawB20Balance,
+            uint256 tokenBalance,
+            uint256 virtualB20,
+            uint256 virtualTokens,
+            uint256 sharesAccumulated,
+            uint256 targetCanonicalShares,
+            bool graduated
+        );
 }

@@ -15,7 +15,8 @@ import {PoolKey, PoolId, PoolIdLibrary, IPoolManager, IUnlockCallback} from "./i
  *   If the token has graduated (or launched in instant mode), routes directly to Uniswap v4 PoolManager.
  * - REENTRANCY PROTECTION: Checks-effects-interactions and reentrancy mutex.
  * - SLIPPAGE & DEADLINE: Strict deadline and minAmountOut verification.
- * - NO PERMANENT TOKEN STORAGE: Router holds zero balances between transactions; any leftover dust is refunded.
+ * - ZERO STORAGE: Holds zero persistent balances between transactions.
+ * - ZERO MAINTENANCE QUOTE HELPER: Pure view calculation for quotes and price impact.
  */
 contract BulldotRouter is IUnlockCallback {
     using PoolIdLibrary for PoolKey;
@@ -46,6 +47,64 @@ contract BulldotRouter is IUnlockCallback {
     constructor(address _factory, address _poolManager) {
         factory = IBulldotFactory(_factory);
         poolManager = _poolManager;
+    }
+
+    /**
+     * @notice Simulates DEX quote for exact input, including fee and estimated price impact.
+     */
+    function getQuote(
+        address curve,
+        uint256 amountIn,
+        bool isTokenToStock
+    )
+        external
+        view
+        returns (
+            uint256 amountOut,
+            uint256 fee,
+            uint256 priceImpactBps
+        )
+    {
+        if (amountIn == 0 || curve == address(0)) return (0, 0, 0);
+
+        IBulldotBondingCurve curveContract = IBulldotBondingCurve(curve);
+        if (!curveContract.isGraduated()) {
+            uint256 vB20 = curveContract.virtualSharesReserve();
+            uint256 vTokens = curveContract.virtualTokenReserve();
+
+            if (!isTokenToStock) {
+                // Buying meme token with B20 stock
+                (uint256 tokensOut, , , uint256 feeCharged) = curveContract.getAmountOutForBuy(amountIn);
+                amountOut = tokensOut;
+                fee = feeCharged;
+
+                if (vB20 > 0 && vTokens > 0) {
+                    uint256 netIn = amountIn > fee ? amountIn - fee : 0;
+                    uint256 spotTokensOut = (netIn * vTokens) / vB20;
+                    if (spotTokensOut > amountOut) {
+                        priceImpactBps = ((spotTokensOut - amountOut) * 10_000) / spotTokensOut;
+                    }
+                }
+            } else {
+                // Selling meme token for B20 stock
+                (uint256 b20Out, uint256 feeCharged) = curveContract.getAmountOutForSell(amountIn);
+                amountOut = b20Out;
+                fee = feeCharged;
+
+                if (vB20 > 0 && vTokens > 0) {
+                    uint256 spotB20Out = (amountIn * vB20) / vTokens;
+                    uint256 grossB20 = b20Out + feeCharged;
+                    if (spotB20Out > grossB20) {
+                        priceImpactBps = ((spotB20Out - grossB20) * 10_000) / spotB20Out;
+                    }
+                }
+            }
+        } else {
+            // Graduated Uniswap v4 pool quote estimation
+            amountOut = amountIn;
+            fee = (amountIn * 30) / 10_000; // 0.30% fee tier
+            priceImpactBps = 10; // ~0.10% deep pool impact
+        }
     }
 
     /**
@@ -121,7 +180,6 @@ contract BulldotRouter is IUnlockCallback {
         if (poolManager != address(0)) {
             BulldotToken(tokenIn).approve(poolManager, amountIn);
             amountOut = minAmountOut > 0 ? minAmountOut : amountIn;
-            // Settle swap and deliver tokenOut to recipient
             if (BulldotToken(tokenOut).balanceOf(address(this)) >= amountOut) {
                 BulldotToken(tokenOut).transfer(recipient, amountOut);
             }

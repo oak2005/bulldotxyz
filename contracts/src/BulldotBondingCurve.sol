@@ -11,9 +11,8 @@ import {PoolKey, PoolId, PoolIdLibrary, IPoolManager, IPositionManager} from "./
  * @notice SECURITY NOTES:
  * - BulldotBondingCurve is an autonomous, multiplier-aware AMM paired with Coinbase B20 tokenized stocks.
  * - AMM SOLVENCY GUARANTEE:
- *   Virtual reserves are denominated in the native traded asset units (raw B20 tokens and Meme tokens)
- *   satisfying (vB20 * vTokens = k). This guarantees that user sell payouts are mathematically bounded
- *   by the contract's actual B20 balance at all times, eliminating insolvency risks regardless of stock splits.
+ *   Virtual reserves are denominated in native traded asset units (raw B20 tokens and Meme tokens)
+ *   satisfying (vB20 * vTokens = k). User sell payouts are mathematically bounded by actual contract B20 balance.
  * - SHARE NORMALIZATION (1 Token != 1 Share):
  *   Graduation threshold (e.g. 50 shares) is denominated in canonical underlying shares via `tokensToShares()`.
  *   When stock splits adjust the multiplier, the target graduation adapts dynamically without distorting AMM pricing.
@@ -70,8 +69,8 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
     uint256 public constant VIRTUAL_TOKENS = 1_073_000_000 * 1e18;
 
     // --- State Variables ---
-    uint256 public virtualSharesReserve; // Virtual B20 reserve (named for interface compatibility)
-    uint256 public virtualTokenReserve;
+    uint256 public override virtualSharesReserve; // Virtual B20 reserve (named for interface compatibility)
+    uint256 public override virtualTokenReserve;
     uint256 public totalB20Deposited;
     bool public override isGraduated;
 
@@ -148,6 +147,106 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
         if (address(feeVault) != address(0)) {
             try feeVault.redirectFeeRecipient(token, newRecipient) {} catch {}
         }
+    }
+
+    /**
+     * @notice Simulates buy output and fees without state modification.
+     */
+    function getAmountOutForBuy(uint256 b20AmountIn)
+        external
+        view
+        override
+        returns (
+            uint256 tokensOut,
+            uint256 effectiveB20In,
+            uint256 refundB20,
+            uint256 fee
+        )
+    {
+        if (isGraduated || b20AmountIn == 0) return (0, 0, 0, 0);
+
+        uint256 currentShares = totalSharesAccumulated();
+        uint256 remainingShares = targetShares > currentShares ? targetShares - currentShares : 0;
+
+        effectiveB20In = b20AmountIn;
+
+        if (remainingShares > 0) {
+            uint256 maxNetB20Allowed = IB20Stock(b20Stock).sharesToTokens(remainingShares);
+            uint256 totalFeeBps = creatorFeeBps + protocolFeeBps;
+            uint256 maxGrossB20 = totalFeeBps < 10_000
+                ? (maxNetB20Allowed * 10_000 + (10_000 - totalFeeBps - 1)) / (10_000 - totalFeeBps)
+                : maxNetB20Allowed;
+
+            if (b20AmountIn > maxGrossB20) {
+                effectiveB20In = maxGrossB20;
+                refundB20 = b20AmountIn - maxGrossB20;
+            }
+        }
+
+        uint256 creatorFee = (effectiveB20In * creatorFeeBps) / 10_000;
+        uint256 protocolFee = (effectiveB20In * protocolFeeBps) / 10_000;
+        fee = creatorFee + protocolFee;
+        uint256 netB20 = effectiveB20In - fee;
+
+        if (netB20 == 0) return (0, effectiveB20In, refundB20, fee);
+
+        uint256 k = virtualSharesReserve * virtualTokenReserve;
+        uint256 newVirtualB20 = virtualSharesReserve + netB20;
+        uint256 newVirtualTokens = k / newVirtualB20;
+        tokensOut = virtualTokenReserve - newVirtualTokens;
+    }
+
+    /**
+     * @notice Simulates sell output and fees without state modification.
+     */
+    function getAmountOutForSell(uint256 tokenAmountIn)
+        external
+        view
+        override
+        returns (uint256 b20Out, uint256 fee)
+    {
+        if (isGraduated || tokenAmountIn == 0) return (0, 0);
+
+        uint256 k = virtualSharesReserve * virtualTokenReserve;
+        uint256 newVirtualTokens = virtualTokenReserve + tokenAmountIn;
+        uint256 newVirtualB20 = k / newVirtualTokens;
+        uint256 grossB20 = virtualSharesReserve - newVirtualB20;
+
+        uint256 availableB20 = IB20Stock(b20Stock).balanceOf(address(this));
+        if (grossB20 > availableB20) {
+            grossB20 = availableB20;
+        }
+
+        uint256 creatorFee = (grossB20 * creatorFeeBps) / 10_000;
+        uint256 protocolFee = (grossB20 * protocolFeeBps) / 10_000;
+        fee = creatorFee + protocolFee;
+        b20Out = grossB20 > fee ? grossB20 - fee : 0;
+    }
+
+    /**
+     * @notice Returns comprehensive pool liquidity and reserve metrics.
+     */
+    function getPoolLiquidity()
+        external
+        view
+        override
+        returns (
+            uint256 rawB20Balance,
+            uint256 tokenBalance,
+            uint256 virtualB20,
+            uint256 virtualTokens,
+            uint256 sharesAccumulated,
+            uint256 targetCanonicalShares,
+            bool graduated
+        )
+    {
+        rawB20Balance = IB20Stock(b20Stock).balanceOf(address(this));
+        tokenBalance = BulldotToken(token).balanceOf(address(this));
+        virtualB20 = virtualSharesReserve;
+        virtualTokens = virtualTokenReserve;
+        sharesAccumulated = totalSharesAccumulated();
+        targetCanonicalShares = targetShares;
+        graduated = isGraduated;
     }
 
     /**
