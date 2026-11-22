@@ -18,9 +18,18 @@ const config = getDefaultConfig({
   ssr: true,
 });
 
-const queryClient = new QueryClient();
-
 export function Providers({ children }: { children: React.ReactNode }) {
+  const [queryClient] = React.useState(
+    () =>
+      new QueryClient({
+        defaultOptions: {
+          queries: {
+            staleTime: 5_000,
+            refetchOnWindowFocus: false,
+          },
+        },
+      })
+  );
   return (
     <WagmiProvider config={config}>
       <QueryClientProvider client={queryClient}>
