@@ -26,3 +26,4 @@ export const CONTRACT_CONFIGS: Record<number, ProtocolDeployment> = {
     factory: '0x0000000000000000000000000000000000000000', // Update after deployment
   },
 };
+

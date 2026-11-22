@@ -35,3 +35,4 @@ contract ConfigHelper is Script {
         config.maxCreatorFeeBps = json.readUint(".maxCreatorFeeBps");
     }
 }
+

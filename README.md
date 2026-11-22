@@ -99,3 +99,4 @@ forge script script/Deploy.s.sol:DeployScript --rpc-url base_mainnet --broadcast
 2. **Permanent Liquidity**: Uniswap v4 positions are routed to `0x000000000000000000000000000000000000dEaD` upon pool creation.
 3. **Multiplier Split Invariance**: Internal calculations evaluate share values via `tokensToShares()`, preventing stock-split frontrunning or curve depletion.
 4. **Transient Reentrancy Protection**: Utilizes EIP-1153 transient storage opcode (`TSTORE`/`TLOAD`) on Base for gas-efficient reentrancy prevention.
+

@@ -15,8 +15,8 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
     // ------------------------------------------------------------------------
     // Immutables & Config
     // ------------------------------------------------------------------------
-    BulldotToken public immutable override token;
-    IB20Stock public immutable override b20Stock;
+    address public immutable override token;
+    address public immutable override b20Stock;
     address public immutable override creator;
     address public immutable protocolFeeRecipient;
     address public override feeRecipient;
@@ -66,8 +66,8 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
         require(_creatorFeeBps <= 200, "Creator fee max 2%");
         require(_protocolFeeBps <= 100, "Protocol fee max 1%");
 
-        token = BulldotToken(_token);
-        b20Stock = IB20Stock(_b20Stock);
+        token = _token;
+        b20Stock = _b20Stock;
         creator = _creator;
         feeRecipient = _feeRecipient == address(0) ? _creator : _feeRecipient;
         protocolFeeRecipient = _protocolFeeRecipient;
@@ -112,18 +112,18 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
         uint256 netB20 = b20AmountIn - creatorFee - protocolFee;
 
         // Pull total B20 from user
-        require(b20Stock.transferFrom(msg.sender, address(this), b20AmountIn), "B20 transfer failed");
+        require(IB20Stock(b20Stock).transferFrom(msg.sender, address(this), b20AmountIn), "B20 transfer failed");
 
         // Distribute fees immediately
         if (creatorFee > 0) {
-            b20Stock.transfer(feeRecipient, creatorFee);
+            IB20Stock(b20Stock).transfer(feeRecipient, creatorFee);
         }
         if (protocolFee > 0 && protocolFeeRecipient != address(0)) {
-            b20Stock.transfer(protocolFeeRecipient, protocolFee);
+            IB20Stock(b20Stock).transfer(protocolFeeRecipient, protocolFee);
         }
 
         // Convert net B20 tokens to canonical shares using current multiplier
-        uint256 sharesIn = b20Stock.tokensToShares(netB20);
+        uint256 sharesIn = IB20Stock(b20Stock).tokensToShares(netB20);
         require(sharesIn > 0, "Shares zero");
 
         // Check if trade crosses graduation threshold
@@ -136,10 +136,10 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
 
         if (sharesIn >= remainingSharesToTarget && remainingSharesToTarget > 0) {
             effectiveSharesIn = remainingSharesToTarget;
-            uint256 effectiveB20 = b20Stock.sharesToTokens(effectiveSharesIn);
+            uint256 effectiveB20 = IB20Stock(b20Stock).sharesToTokens(effectiveSharesIn);
             if (netB20 > effectiveB20) {
                 refundB20 = netB20 - effectiveB20;
-                b20Stock.transfer(recipient, refundB20);
+                IB20Stock(b20Stock).transfer(recipient, refundB20);
             }
         }
 
@@ -150,14 +150,14 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
         tokensOut = virtualTokenReserve - newVirtualTokens;
 
         require(tokensOut >= minTokensOut, "Slippage exceeded");
-        require(token.balanceOf(address(this)) >= tokensOut + MIGRATION_TOKENS, "Insufficient curve reserve");
+        require(BulldotToken(token).balanceOf(address(this)) >= tokensOut + MIGRATION_TOKENS, "Insufficient curve reserve");
 
         virtualSharesReserve = newVirtualShares;
         virtualTokenReserve = newVirtualTokens;
         totalSharesAccumulated += effectiveSharesIn;
 
         // Send tokens to buyer
-        require(token.transfer(recipient, tokensOut), "Token transfer failed");
+        require(BulldotToken(token).transfer(recipient, tokensOut), "Token transfer failed");
 
         emit TokensPurchased(msg.sender, recipient, b20AmountIn - refundB20, tokensOut, creatorFee + protocolFee);
 
@@ -180,7 +180,7 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
         require(recipient != address(0), "Invalid recipient");
 
         // Pull tokens from user
-        require(token.transferFrom(msg.sender, address(this), tokenAmountIn), "Token transfer failed");
+        require(BulldotToken(token).transferFrom(msg.sender, address(this), tokenAmountIn), "Token transfer failed");
 
         // Constant product: (vTokens + tokensIn) * (vShares - sharesOut) = k
         uint256 k = virtualSharesReserve * virtualTokenReserve;
@@ -191,8 +191,8 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
         require(sharesOut > 0, "Zero shares out");
 
         // Convert canonical shares to raw B20 token units via live multiplier
-        uint256 grossB20 = b20Stock.sharesToTokens(sharesOut);
-        require(b20Stock.balanceOf(address(this)) >= grossB20, "Insufficient B20 reserve");
+        uint256 grossB20 = IB20Stock(b20Stock).sharesToTokens(sharesOut);
+        require(IB20Stock(b20Stock).balanceOf(address(this)) >= grossB20, "Insufficient B20 reserve");
 
         uint256 creatorFee = (grossB20 * creatorFeeBps) / 10000;
         uint256 protocolFee = (grossB20 * protocolFeeBps) / 10000;
@@ -210,12 +210,12 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
 
         // Payout B20 to seller & fees
         if (creatorFee > 0) {
-            b20Stock.transfer(feeRecipient, creatorFee);
+            IB20Stock(b20Stock).transfer(feeRecipient, creatorFee);
         }
         if (protocolFee > 0 && protocolFeeRecipient != address(0)) {
-            b20Stock.transfer(protocolFeeRecipient, protocolFee);
+            IB20Stock(b20Stock).transfer(protocolFeeRecipient, protocolFee);
         }
-        require(b20Stock.transfer(recipient, b20Out), "B20 payout failed");
+        require(IB20Stock(b20Stock).transfer(recipient, b20Out), "B20 payout failed");
 
         emit TokensSold(msg.sender, recipient, tokenAmountIn, b20Out, creatorFee + protocolFee);
     }
@@ -235,23 +235,24 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
     function _executeGraduation() internal {
         isGraduated = true;
 
-        uint256 b20Balance = b20Stock.balanceOf(address(this));
-        uint256 tokenBalance = token.balanceOf(address(this));
+        uint256 b20Balance = IB20Stock(b20Stock).balanceOf(address(this));
+        uint256 tokenBalance = BulldotToken(token).balanceOf(address(this));
 
         // Liquidity destination is dead address forever
         address permanentDead = address(0x000000000000000000000000000000000000dEaD);
 
         // Approve PoolManager / PositionManager
-        b20Stock.approve(positionManager != address(0) ? positionManager : poolManager, b20Balance);
-        token.approve(positionManager != address(0) ? positionManager : poolManager, tokenBalance);
+        IB20Stock(b20Stock).approve(positionManager != address(0) ? positionManager : poolManager, b20Balance);
+        BulldotToken(token).approve(positionManager != address(0) ? positionManager : poolManager, tokenBalance);
 
         // If deployed with full Uniswap v4 position manager, mint locked full-range position directly to dead address
         // Otherwise hold in immutable dead address as irrevocable reserve
         if (positionManager == address(0)) {
-            b20Stock.transfer(permanentDead, b20Balance);
-            token.transfer(permanentDead, tokenBalance);
+            IB20Stock(b20Stock).transfer(permanentDead, b20Balance);
+            BulldotToken(token).transfer(permanentDead, tokenBalance);
         }
 
         emit Graduated(address(token), address(b20Stock), b20Balance, tokenBalance);
     }
 }
+

@@ -2,12 +2,19 @@
 pragma solidity 0.8.26;
 
 /**
- * @title BulldotToken
- * @notice Fixed-supply, gas-optimized ERC20 token with EIP-2612 Permit for Bulldot launches.
- * @dev 1,000,000,000 fixed supply minted 100% to recipient (bonding curve or initial pool).
- * Immutable - no minting functions exist after deployment.
+ * @notice SECURITY NOTES:
+ * - 1,000,000,000 * 10^18 fixed total supply minted entirely upon construction.
+ * - No minting or burning functions exist after deployment — total supply is permanently fixed.
+ * - Includes EIP-2612 Permit for gasless off-chain approvals.
+ * - Strictly follows checks-effects-interactions; safe against reentrancy.
  */
 contract BulldotToken {
+    error InsufficientBalance();
+    error InsufficientAllowance();
+    error ZeroAddress();
+    error PermitExpired();
+    error InvalidSigner();
+
     string public name;
     string public symbol;
     uint8 public constant decimals = 18;
@@ -25,6 +32,8 @@ contract BulldotToken {
     event Approval(address indexed owner, address indexed spender, uint256 value);
 
     constructor(string memory _name, string memory _symbol, address _recipient) {
+        if (_recipient == address(0)) revert ZeroAddress();
+
         name = _name;
         symbol = _symbol;
 
@@ -56,7 +65,7 @@ contract BulldotToken {
     function transferFrom(address from, address to, uint256 amount) external returns (bool) {
         uint256 currentAllowance = allowance[from][msg.sender];
         if (currentAllowance != type(uint256).max) {
-            require(currentAllowance >= amount, "ERC20: insufficient allowance");
+            if (currentAllowance < amount) revert InsufficientAllowance();
             unchecked {
                 allowance[from][msg.sender] = currentAllowance - amount;
             }
@@ -66,9 +75,10 @@ contract BulldotToken {
     }
 
     function _transfer(address from, address to, uint256 amount) internal {
-        require(to != address(0), "ERC20: transfer to zero");
+        if (to == address(0)) revert ZeroAddress();
         uint256 fromBalance = balanceOf[from];
-        require(fromBalance >= amount, "ERC20: transfer exceeds balance");
+        if (fromBalance < amount) revert InsufficientBalance();
+
         unchecked {
             balanceOf[from] = fromBalance - amount;
             balanceOf[to] += amount;
@@ -85,13 +95,14 @@ contract BulldotToken {
         bytes32 r,
         bytes32 s
     ) external {
-        require(block.timestamp <= deadline, "ERC20Permit: expired");
+        if (block.timestamp > deadline) revert PermitExpired();
+
         bytes32 structHash = keccak256(
             abi.encode(PERMIT_TYPEHASH, owner, spender, value, nonces[owner]++, deadline)
         );
         bytes32 hash = keccak256(abi.encodePacked("\x19\x01", DOMAIN_SEPARATOR, structHash));
         address signer = ecrecover(hash, v, r, s);
-        require(signer != address(0) && signer == owner, "ERC20Permit: invalid signature");
+        if (signer == address(0) || signer != owner) revert InvalidSigner();
 
         allowance[owner][spender] = value;
         emit Approval(owner, spender, value);

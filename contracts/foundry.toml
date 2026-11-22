@@ -6,7 +6,7 @@ solc_version = "0.8.26"
 evm_version = "cancun"
 optimizer = true
 optimizer_runs = 1_000_000
-via_ir = false
+via_ir = true
 fs_permissions = [{ access = "read", path = "./config" }]
 
 [rpc_endpoints]
@@ -16,3 +16,4 @@ base_mainnet = "${BASE_MAINNET_RPC_URL}"
 [etherscan]
 base_sepolia = { key = "${BASESCAN_API_KEY}", url = "https://api-sepolia.basescan.org/api" }
 base_mainnet = { key = "${BASESCAN_API_KEY}", url = "https://api.basescan.org/api" }
+

@@ -21,3 +21,4 @@ export interface BondingCurveProgress {
   virtualPriceB20: bigint;
   effectiveMultiplier: bigint;
 }
+

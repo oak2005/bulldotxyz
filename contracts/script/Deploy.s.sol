@@ -43,7 +43,6 @@ contract DeployScript is Script {
             poolManager,
             positionManager,
             deployer, // protocol fee recipient
-            protocolFeeBps,
             initialStocks
         );
 
@@ -52,3 +51,4 @@ contract DeployScript is Script {
         vm.stopBroadcast();
     }
 }
+

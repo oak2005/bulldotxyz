@@ -25,9 +25,12 @@ contract BulldotBondingCurveTest is Test {
         // 1. Deploy Mock B20 Stock (e.g. bCOIN)
         b20Stock = new MockB20Stock("Coinbase Tokenized Stock", "bCOIN");
 
-        // 2. Deploy Curve (placeholder for token initially)
+        // 2. Deploy Token with recipient = address(this)
+        token = new BulldotToken("BULL PROTOCOL", "BULL", address(this));
+
+        // 3. Deploy Curve with genuine token address
         curve = new BulldotBondingCurve(
-            address(0),
+            address(token),
             address(b20Stock),
             creator,
             feeRecipient,
@@ -39,11 +42,8 @@ contract BulldotBondingCurveTest is Test {
             address(0)  // PositionManager mock/dummy
         );
 
-        // 3. Deploy Token with 100% of supply minted to Curve
-        token = new BulldotToken("BULL PROTOCOL", "BULL", address(curve));
-
-        // Update token address in curve via test cheatcode or custom helper
-        vm.store(address(curve), bytes32(uint256(0)), bytes32(uint256(uint160(address(token)))));
+        // 4. Fund curve with 100% of token supply
+        token.transfer(address(curve), token.totalSupply());
 
         // Fund test users with B20 stock tokens
         b20Stock.mint(alice, 1000 * 1e18);
@@ -118,3 +118,4 @@ contract BulldotBondingCurveTest is Test {
         assertEq(b20Stock.balanceOf(alice), b20Before + b20Out);
     }
 }
+

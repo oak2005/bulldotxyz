@@ -21,3 +21,4 @@ export function getChainConfig(chainId: number) {
     rpcUrl: 'https://sepolia.base.org',
   };
 }
+

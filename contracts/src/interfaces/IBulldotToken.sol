@@ -21,3 +21,4 @@ interface IBulldotToken {
         bytes32 s
     ) external;
 }
+

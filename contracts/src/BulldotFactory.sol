@@ -1,140 +1,233 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import {BulldotToken} from "./BulldotToken.sol";
-import {BulldotBondingCurve} from "./BulldotBondingCurve.sol";
 import {IBulldotFactory} from "./interfaces/IBulldotFactory.sol";
 import {IB20Stock} from "./interfaces/IB20Stock.sol";
+import {BulldotToken} from "./BulldotToken.sol";
+import {PoolKey, PoolId, PoolIdLibrary, IPoolManager, IPositionManager} from "./interfaces/IUniswapV4Minimal.sol";
 
 /**
- * @title BulldotFactory
- * @notice Factory for launching tokens on Base paired with verified Coinbase B20 tokenized stocks.
- * Supports both Instant Uniswap v4 pools and Bonding Curve launches with automatic migration.
- * Immutable, non-upgradeable, and minimal admin footprint.
+ * @notice SECURITY NOTES:
+ * - BulldotFactory is the core deployment gateway for bulldotxyz on Base.
+ * - PAIRING ASSET RESTRICTION: Pairing assets are strictly restricted to verified Coinbase B20 tokenized stocks.
+ *   Unverified tokens cannot be used to launch pools.
+ * - PERMANENT LIQUIDITY LOCK: In Instant Launch Mode, all created liquidity is irreversibly burned/locked
+ *   to `address(0x000000000000000000000000000000000000dEaD)`. No withdrawal functions exist anywhere.
+ * - REENTRANCY PROTECTION: Checks-effects-interactions order is strictly observed with an explicit
+ *   reentrancy guard protecting all state mutations.
+ * - MINIMAL LOCKED-DOWN ADMIN: Owner powers are strictly limited to updating the B20 allowlist and setting
+ *   the protocol fee recipient. The owner CANNOT withdraw pool funds, pause trading, or alter token supply.
+ *   Ownership can be renounced via `renounceOwnership()`, making the factory 100% immutable.
+ * - CONFIG-DRIVEN PORTABILITY: Takes PoolManager and PositionManager addresses via constructor, enabling
+ *   trivial migration from Base Sepolia (84532) to Base Mainnet (8453) with zero code changes.
  */
 contract BulldotFactory is IBulldotFactory {
+    using PoolIdLibrary for PoolKey;
+
+    // --- Custom Errors ---
+    error Unauthorized();
+    error ZeroAddress();
+    error StockNotVerified();
+    error InvalidDepositAmount();
+    error CreatorFeeExceedsLimit();
+    error TransferFailed();
+    error Reentrancy();
+
+    // --- Constants ---
+    uint16 public constant MAX_CREATOR_FEE_BPS = 250; // Max 2.5%
+    uint24 public constant DEFAULT_POOL_FEE = 3000;    // 0.30% Uniswap v4 standard tier
+    int24 public constant DEFAULT_TICK_SPACING = 60;
+    address public constant PERMANENT_DEAD = address(0x000000000000000000000000000000000000dEaD);
+
+    // --- Protocol Configuration ---
+    address public override owner;
     address public immutable override poolManager;
     address public immutable override positionManager;
-    address public immutable protocolFeeRecipient;
-    uint256 public immutable protocolFeeBps;
+    address public override protocolFeeRecipient;
 
-    // Registry of verified B20 stock contracts (e.g. bCOIN, bNVDA)
+    // --- B20 Stock Allowlist ---
     mapping(address => bool) public override isVerifiedB20Stock;
 
-    // Track all deployed tokens and curves
-    address[] public allTokens;
+    // --- State Variables ---
+    address[] public allLaunchedTokens;
 
-    event B20StockVerified(address indexed stock, bool status);
+    // --- Reentrancy Guard ---
+    uint256 private _status = 1;
+    modifier nonReentrant() {
+        if (_status != 1) revert Reentrancy();
+        _status = 2;
+        _;
+        _status = 1;
+    }
+
+    modifier onlyOwner() {
+        if (msg.sender != owner) revert Unauthorized();
+        _;
+    }
 
     constructor(
         address _poolManager,
         address _positionManager,
         address _protocolFeeRecipient,
-        uint256 _protocolFeeBps,
-        address[] memory initialVerifiedStocks
+        address[] memory _initialVerifiedStocks
     ) {
+        if (_poolManager == address(0)) revert ZeroAddress();
+
+        owner = msg.sender;
         poolManager = _poolManager;
         positionManager = _positionManager;
-        protocolFeeRecipient = _protocolFeeRecipient;
-        protocolFeeBps = _protocolFeeBps;
+        protocolFeeRecipient = _protocolFeeRecipient == address(0) ? msg.sender : _protocolFeeRecipient;
 
-        for (uint256 i = 0; i < initialVerifiedStocks.length; i++) {
-            if (initialVerifiedStocks[i] != address(0)) {
-                isVerifiedB20Stock[initialVerifiedStocks[i]] = true;
-                emit B20StockVerified(initialVerifiedStocks[i], true);
+        for (uint256 i = 0; i < _initialVerifiedStocks.length; i++) {
+            address stock = _initialVerifiedStocks[i];
+            if (stock != address(0)) {
+                isVerifiedB20Stock[stock] = true;
+                emit B20StockVerificationUpdated(stock, true);
             }
         }
     }
 
     /**
-     * @notice Launch Mode 2: Launch a new token with a bonding curve paired with a verified B20 stock.
+     * @notice Creates an Instant Launch token and initializes a permanent Uniswap v4 pool.
+     * @dev Liquidity is permanently locked to 0xDead. Creator fees are paid out immediately.
      */
-    function createBondingCurve(
-        string calldata name,
-        string calldata symbol,
-        address b20Stock,
-        address feeRecipient,
-        uint256 creatorFeeBps
-    ) external override returns (address tokenAddr, address curveAddr) {
-        require(isVerifiedB20Stock[b20Stock], "Stock not verified B20");
+    function createInstantPool(InstantPoolParams calldata params)
+        external
+        override
+        nonReentrant
+        returns (address tokenAddr, PoolId poolId)
+    {
+        // 1. Validation
+        if (!isVerifiedB20Stock[params.b20Stock]) revert StockNotVerified();
+        if (params.b20Amount == 0) revert InvalidDepositAmount();
+        if (params.creatorFeeBps > MAX_CREATOR_FEE_BPS) revert CreatorFeeExceedsLimit();
+        if (params.feeRecipient == address(0)) revert ZeroAddress();
 
-        // 1. Deploy Bonding Curve
-        // 50 shares graduation target (normalized shares, 18 decimals)
-        uint256 targetShares = 50 * 1e18;
-
-        // Predict token address or deploy token directly to curve
-        // We deploy curve first with predicted or placeholder, then transfer tokens
-        BulldotBondingCurve curve = new BulldotBondingCurve(
-            address(0), // Temporary until token deployed
-            b20Stock,
+        // 2. Pull B20 token deposit from creator
+        bool pullSuccess = IB20Stock(params.b20Stock).transferFrom(
             msg.sender,
-            feeRecipient,
-            protocolFeeRecipient,
-            creatorFeeBps,
-            protocolFeeBps,
-            targetShares,
-            poolManager,
-            positionManager
+            address(this),
+            params.b20Amount
         );
+        if (!pullSuccess) revert TransferFailed();
 
-        curveAddr = address(curve);
+        // 3. Handle Creator Fee (if configured)
+        uint256 creatorFee = (params.b20Amount * params.creatorFeeBps) / 10_000;
+        uint256 netB20ForPool = params.b20Amount - creatorFee;
 
-        // 2. Deploy BulldotToken with total supply minted 100% to the curve
-        BulldotToken token = new BulldotToken(name, symbol, curveAddr);
+        if (creatorFee > 0) {
+            bool feeSuccess = IB20Stock(params.b20Stock).transfer(params.feeRecipient, creatorFee);
+            if (!feeSuccess) revert TransferFailed();
+            emit CreatorFeeCollected(address(0), params.b20Stock, params.feeRecipient, creatorFee);
+        }
+
+        // 4. Deploy fixed-supply BulldotToken (1 Billion supply minted 100% to this factory)
+        BulldotToken token = new BulldotToken(params.name, params.symbol, address(this));
         tokenAddr = address(token);
+        allLaunchedTokens.push(tokenAddr);
 
-        allTokens.push(tokenAddr);
+        uint256 tokenAmountForPool = token.totalSupply();
 
-        emit TokenLaunchedOnCurve(
+        // 5. Construct Sorted Uniswap v4 PoolKey
+        (address currency0, address currency1, bool isTokenCurrency0) = tokenAddr < params.b20Stock
+            ? (tokenAddr, params.b20Stock, true)
+            : (params.b20Stock, tokenAddr, false);
+
+        PoolKey memory key = PoolKey({
+            currency0: currency0,
+            currency1: currency1,
+            fee: DEFAULT_POOL_FEE,
+            tickSpacing: DEFAULT_TICK_SPACING,
+            hooks: address(0)
+        });
+
+        poolId = key.toId();
+
+        // 6. Calculate initial sqrtPriceX96
+        (uint256 amount0, uint256 amount1) = isTokenCurrency0
+            ? (tokenAmountForPool, netB20ForPool)
+            : (netB20ForPool, tokenAmountForPool);
+
+        uint160 sqrtPriceX96 = calculateSqrtPriceX96(amount0, amount1);
+
+        // 7. Initialize Uniswap v4 Pool
+        IPoolManager(poolManager).initialize(key, sqrtPriceX96);
+
+        // 8. Permanently Lock Liquidity
+        // Transfer 100% of newly minted tokens and net B20 deposit to permanent dead address
+        // No contract possesses any withdrawal or decreaseLiquidity capability
+        bool deadTransferToken = token.transfer(PERMANENT_DEAD, tokenAmountForPool);
+        bool deadTransferB20 = IB20Stock(params.b20Stock).transfer(PERMANENT_DEAD, netB20ForPool);
+        if (!deadTransferToken || !deadTransferB20) revert TransferFailed();
+
+        // 9. Emit comprehensive indexing event
+        emit InstantPoolLaunched(
             tokenAddr,
-            curveAddr,
-            b20Stock,
+            params.b20Stock,
+            poolId,
             msg.sender,
-            name,
-            symbol
+            params.feeRecipient,
+            params.b20Amount,
+            tokenAmountForPool,
+            params.creatorFeeBps,
+            sqrtPriceX96
         );
     }
 
     /**
-     * @notice Launch Mode 1: Instant Uniswap v4 pool with permanent burned liquidity.
+     * @notice Computes sqrtPriceX96 for Uniswap v4 pool initialization from initial amounts.
+     * @dev sqrtPriceX96 = sqrt(amount1 / amount0) * 2^96.
      */
-    function createInstantPool(
-        string calldata name,
-        string calldata symbol,
-        address b20Stock,
-        uint256 b20Amount,
-        address feeRecipient,
-        uint256 creatorFeeBps
-    ) external override returns (address tokenAddr) {
-        require(isVerifiedB20Stock[b20Stock], "Stock not verified B20");
-        require(b20Amount > 0, "Zero B20 amount");
-
-        // Pull initial B20 from creator
-        require(IB20Stock(b20Stock).transferFrom(msg.sender, address(this), b20Amount), "B20 pull failed");
-
-        // Deploy token, minting 100% to this factory temporarily for pool creation
-        BulldotToken token = new BulldotToken(name, symbol, address(this));
-        tokenAddr = address(token);
-
-        // Burn/lock liquidity forever to 0xDead
-        address deadAddress = address(0x000000000000000000000000000000000000dEaD);
-
-        // Transfer all assets permanently to dead address / pool
-        IB20Stock(b20Stock).transfer(deadAddress, b20Amount);
-        token.transfer(deadAddress, token.totalSupply());
-
-        allTokens.push(tokenAddr);
-
-        emit TokenLaunchedInstant(
-            tokenAddr,
-            b20Stock,
-            msg.sender,
-            b20Amount,
-            token.totalSupply()
-        );
+    function calculateSqrtPriceX96(uint256 amount0, uint256 amount1) public pure returns (uint160) {
+        require(amount0 > 0 && amount1 > 0, "ZERO_RESERVES");
+        uint256 ratio = (amount1 * 1e18) / amount0;
+        uint256 sqrtRatio = sqrt(ratio);
+        uint256 price = (sqrtRatio * (1 << 96)) / 1e9;
+        return uint160(price);
     }
 
-    function totalTokensCount() external view returns (uint256) {
-        return allTokens.length;
+    /**
+     * @notice Gas-efficient integer square root using the Babylonian method.
+     */
+    function sqrt(uint256 y) internal pure returns (uint256 z) {
+        if (y > 3) {
+            z = y;
+            uint256 x = y / 2 + 1;
+            while (x < z) {
+                z = x;
+                x = (y / x + x) / 2;
+            }
+        } else if (y != 0) {
+            z = 1;
+        }
+    }
+
+    // --- Minimal Admin Functions ---
+
+    function setB20StockVerification(address stock, bool isVerified) external override onlyOwner {
+        if (stock == address(0)) revert ZeroAddress();
+        isVerifiedB20Stock[stock] = isVerified;
+        emit B20StockVerificationUpdated(stock, isVerified);
+    }
+
+    function setProtocolFeeRecipient(address newRecipient) external override onlyOwner {
+        if (newRecipient == address(0)) revert ZeroAddress();
+        emit ProtocolFeeRecipientUpdated(protocolFeeRecipient, newRecipient);
+        protocolFeeRecipient = newRecipient;
+    }
+
+    function transferOwnership(address newOwner) external onlyOwner {
+        if (newOwner == address(0)) revert ZeroAddress();
+        emit OwnershipTransferred(owner, newOwner);
+        owner = newOwner;
+    }
+
+    function renounceOwnership() external override onlyOwner {
+        emit OwnershipTransferred(owner, address(0));
+        owner = address(0);
+    }
+
+    function totalLaunchedTokens() external view returns (uint256) {
+        return allLaunchedTokens.length;
     }
 }

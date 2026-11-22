@@ -55,3 +55,4 @@ export const VERIFIED_B20_STOCKS: B20StockMetadata[] = [
     },
   },
 ];
+

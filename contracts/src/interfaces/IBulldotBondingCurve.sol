@@ -38,3 +38,4 @@ interface IBulldotBondingCurve {
     function sell(uint256 tokenAmountIn, uint256 minB20Out, address recipient) external returns (uint256 b20Out);
     function graduate() external;
 }
+
