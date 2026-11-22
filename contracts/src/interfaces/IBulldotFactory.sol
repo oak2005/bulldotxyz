@@ -7,6 +7,7 @@ import {PoolKey, PoolId} from "./IUniswapV4Minimal.sol";
  * @notice SECURITY NOTES:
  * - Interface for BulldotFactory: the deployment gateway for bulldotxyz on Base.
  * - Enforces pairing restrictions exclusively to verified B20 stock assets.
+ * - Supports dual launch modes: Instant Uniswap v4 Pools and Bonding Curves with automated migration.
  * - Emits comprehensive indexed events for lightweight off-chain indexers.
  */
 interface IBulldotFactory {
@@ -15,6 +16,14 @@ interface IBulldotFactory {
         string symbol;
         address b20Stock;
         uint256 b20Amount;
+        address feeRecipient;
+        uint16 creatorFeeBps; // Max 250 bps (2.5%)
+    }
+
+    struct BondingCurveParams {
+        string name;
+        string symbol;
+        address b20Stock;
         address feeRecipient;
         uint16 creatorFeeBps; // Max 250 bps (2.5%)
     }
@@ -29,6 +38,16 @@ interface IBulldotFactory {
         uint256 initialTokenAmount,
         uint16 creatorFeeBps,
         uint160 sqrtPriceX96
+    );
+
+    event BondingCurveLaunched(
+        address indexed token,
+        address indexed curve,
+        address indexed b20Stock,
+        address creator,
+        address feeRecipient,
+        uint16 creatorFeeBps,
+        uint256 targetShares
     );
 
     event CreatorFeeCollected(
@@ -46,9 +65,11 @@ interface IBulldotFactory {
     function positionManager() external view returns (address);
     function protocolFeeRecipient() external view returns (address);
     function isVerifiedB20Stock(address stock) external view returns (bool);
+    function isDeployedCurve(address curve) external view returns (bool);
     function owner() external view returns (address);
 
     function createInstantPool(InstantPoolParams calldata params) external returns (address token, PoolId poolId);
+    function createBondingCurve(BondingCurveParams calldata params) external returns (address token, address curve);
     function setB20StockVerification(address stock, bool isVerified) external;
     function setProtocolFeeRecipient(address newRecipient) external;
     function renounceOwnership() external;

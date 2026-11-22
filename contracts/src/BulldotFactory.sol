@@ -4,6 +4,7 @@ pragma solidity 0.8.26;
 import {IBulldotFactory} from "./interfaces/IBulldotFactory.sol";
 import {IB20Stock} from "./interfaces/IB20Stock.sol";
 import {BulldotToken} from "./BulldotToken.sol";
+import {BulldotBondingCurve} from "./BulldotBondingCurve.sol";
 import {PoolKey, PoolId, PoolIdLibrary, IPoolManager, IPositionManager} from "./interfaces/IUniswapV4Minimal.sol";
 
 /**
@@ -11,8 +12,11 @@ import {PoolKey, PoolId, PoolIdLibrary, IPoolManager, IPositionManager} from "./
  * - BulldotFactory is the core deployment gateway for bulldotxyz on Base.
  * - PAIRING ASSET RESTRICTION: Pairing assets are strictly restricted to verified Coinbase B20 tokenized stocks.
  *   Unverified tokens cannot be used to launch pools.
- * - PERMANENT LIQUIDITY LOCK: In Instant Launch Mode, all created liquidity is irreversibly burned/locked
- *   to `address(0x000000000000000000000000000000000000dEaD)`. No withdrawal functions exist anywhere.
+ * - DUAL LAUNCH MODES:
+ *   1. Instant Uniswap v4 Pool: Seeds a permanent pool immediately and burns liquidity to 0xDead.
+ *   2. Bonding Curve Mode: Deploys an autonomous curve with automatic migration to Uniswap v4 on completion.
+ * - PERMANENT LIQUIDITY LOCK: All liquidity created by instant mode or bonding curve graduation is irreversibly
+ *   locked to `address(0x000000000000000000000000000000000000dEaD)`. No withdrawal hooks exist anywhere.
  * - REENTRANCY PROTECTION: Checks-effects-interactions order is strictly observed with an explicit
  *   reentrancy guard protecting all state mutations.
  * - MINIMAL LOCKED-DOWN ADMIN: Owner powers are strictly limited to updating the B20 allowlist and setting
@@ -48,7 +52,8 @@ contract BulldotFactory is IBulldotFactory {
     // --- B20 Stock Allowlist ---
     mapping(address => bool) public override isVerifiedB20Stock;
 
-    // --- State Variables ---
+    // --- Deployed Registries ---
+    mapping(address => bool) public override isDeployedCurve;
     address[] public allLaunchedTokens;
 
     // --- Reentrancy Guard ---
@@ -88,8 +93,7 @@ contract BulldotFactory is IBulldotFactory {
     }
 
     /**
-     * @notice Creates an Instant Launch token and initializes a permanent Uniswap v4 pool.
-     * @dev Liquidity is permanently locked to 0xDead. Creator fees are paid out immediately.
+     * @notice Launch Mode 1: Instant Uniswap v4 pool with permanent liquidity lock to 0xDead.
      */
     function createInstantPool(InstantPoolParams calldata params)
         external
@@ -153,14 +157,12 @@ contract BulldotFactory is IBulldotFactory {
         // 7. Initialize Uniswap v4 Pool
         IPoolManager(poolManager).initialize(key, sqrtPriceX96);
 
-        // 8. Permanently Lock Liquidity
-        // Transfer 100% of newly minted tokens and net B20 deposit to permanent dead address
-        // No contract possesses any withdrawal or decreaseLiquidity capability
+        // 8. Permanently Lock Liquidity to Dead address
         bool deadTransferToken = token.transfer(PERMANENT_DEAD, tokenAmountForPool);
         bool deadTransferB20 = IB20Stock(params.b20Stock).transfer(PERMANENT_DEAD, netB20ForPool);
         if (!deadTransferToken || !deadTransferB20) revert TransferFailed();
 
-        // 9. Emit comprehensive indexing event
+        // 9. Emit indexing event
         emit InstantPoolLaunched(
             tokenAddr,
             params.b20Stock,
@@ -175,9 +177,60 @@ contract BulldotFactory is IBulldotFactory {
     }
 
     /**
-     * @notice Computes sqrtPriceX96 for Uniswap v4 pool initialization from initial amounts.
-     * @dev sqrtPriceX96 = sqrt(amount1 / amount0) * 2^96.
+     * @notice Launch Mode 2: Launch a new token with an autonomous bonding curve paired with a verified B20 stock.
+     * @dev Automatically seeds curve with 100% of newly minted token supply.
      */
+    function createBondingCurve(BondingCurveParams calldata params)
+        external
+        override
+        nonReentrant
+        returns (address tokenAddr, address curveAddr)
+    {
+        // 1. Validation
+        if (!isVerifiedB20Stock[params.b20Stock]) revert StockNotVerified();
+        if (params.creatorFeeBps > MAX_CREATOR_FEE_BPS) revert CreatorFeeExceedsLimit();
+        if (params.feeRecipient == address(0)) revert ZeroAddress();
+
+        // 2. Deploy BulldotToken with supply minted to factory for immediate handoff
+        BulldotToken token = new BulldotToken(params.name, params.symbol, address(this));
+        tokenAddr = address(token);
+        allLaunchedTokens.push(tokenAddr);
+
+        // 3. Canonical target: 50 canonical shares
+        uint256 targetShares = 50 * 1e18;
+
+        // 4. Deploy BulldotBondingCurve
+        BulldotBondingCurve curve = new BulldotBondingCurve(
+            tokenAddr,
+            params.b20Stock,
+            msg.sender,
+            params.feeRecipient,
+            protocolFeeRecipient,
+            params.creatorFeeBps,
+            0, // Default protocol fee
+            targetShares,
+            poolManager,
+            positionManager
+        );
+        curveAddr = address(curve);
+        isDeployedCurve[curveAddr] = true;
+
+        // 5. Transfer 100% of token supply to the curve
+        bool transferSuccess = token.transfer(curveAddr, token.totalSupply());
+        if (!transferSuccess) revert TransferFailed();
+
+        // 6. Emit clean event for indexing
+        emit BondingCurveLaunched(
+            tokenAddr,
+            curveAddr,
+            params.b20Stock,
+            msg.sender,
+            params.feeRecipient,
+            params.creatorFeeBps,
+            targetShares
+        );
+    }
+
     function calculateSqrtPriceX96(uint256 amount0, uint256 amount1) public pure returns (uint160) {
         require(amount0 > 0 && amount1 > 0, "ZERO_RESERVES");
         uint256 ratio = (amount1 * 1e18) / amount0;
@@ -186,9 +239,6 @@ contract BulldotFactory is IBulldotFactory {
         return uint160(price);
     }
 
-    /**
-     * @notice Gas-efficient integer square root using the Babylonian method.
-     */
     function sqrt(uint256 y) internal pure returns (uint256 z) {
         if (y > 3) {
             z = y;

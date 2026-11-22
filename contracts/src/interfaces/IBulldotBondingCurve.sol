@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity 0.8.26;
 
+/**
+ * @notice SECURITY NOTES:
+ * - Interface for BulldotBondingCurve: autonomous AMM paired with Coinbase B20 tokenized stock.
+ * - Handles creator fees during the bonding phase and triggers graduation once targetShares is reached.
+ */
 interface IBulldotBondingCurve {
     event TokensPurchased(
         address indexed buyer,
@@ -21,8 +26,16 @@ interface IBulldotBondingCurve {
     event Graduated(
         address indexed token,
         address indexed b20Stock,
+        bytes32 indexed poolId,
         uint256 b20Reserve,
-        uint256 tokenReserve
+        uint256 tokenReserve,
+        uint160 sqrtPriceX96
+    );
+
+    event CreatorFeeCollected(
+        address indexed token,
+        address indexed recipient,
+        uint256 feeAmount
     );
 
     function token() external view returns (address);
@@ -38,4 +51,3 @@ interface IBulldotBondingCurve {
     function sell(uint256 tokenAmountIn, uint256 minB20Out, address recipient) external returns (uint256 b20Out);
     function graduate() external;
 }
-

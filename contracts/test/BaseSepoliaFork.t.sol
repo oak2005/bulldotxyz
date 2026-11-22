@@ -3,6 +3,7 @@ pragma solidity 0.8.26;
 
 import {Test, console2} from "forge-std/Test.sol";
 import {BulldotFactory} from "../src/BulldotFactory.sol";
+import {BulldotBondingCurve} from "../src/BulldotBondingCurve.sol";
 import {BulldotToken} from "../src/BulldotToken.sol";
 import {MockB20Stock} from "../src/mocks/MockB20Stock.sol";
 import {IBulldotFactory} from "../src/interfaces/IBulldotFactory.sol";
@@ -13,8 +14,7 @@ import {PoolId} from "../src/interfaces/IUniswapV4Minimal.sol";
  * - Base Sepolia Fork Test (Chain ID: 84532).
  * - Verifies interaction with the live Uniswap v4 PoolManager deployed at
  *   0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408 on Base Sepolia.
- * - Confirms that liquidity locking and pool initialization work without modification
- *   against genuine Base Sepolia state.
+ * - Tests both Launch Mode 1 (Instant Pool) and Launch Mode 2 (Bonding Curve + Auto-Migration).
  */
 contract BaseSepoliaForkTest is Test {
     address public constant BASE_SEPOLIA_POOL_MANAGER = 0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408;
@@ -25,11 +25,11 @@ contract BaseSepoliaForkTest is Test {
     address public owner = address(0xA1);
     address public creator = address(0xB1);
     address public feeRecipient = address(0xC1);
+    address public buyer = address(0xD1);
 
     uint256 public constant INITIAL_DEPOSIT = 25 * 1e18; // 25 bCOIN tokens
 
     function setUp() public {
-        // Fork Base Sepolia if RPC is reachable; otherwise skip smoothly
         string memory rpcUrl = vm.envOr("BASE_SEPOLIA_RPC_URL", string("https://sepolia.base.org"));
         
         try vm.createSelectFork(rpcUrl) returns (uint256 forkId) {
@@ -41,10 +41,10 @@ contract BaseSepoliaForkTest is Test {
 
         vm.startPrank(owner);
 
-        // 1. Deploy mock B20 stock (Coinbase stocks on Base mainnet are mainnet-only)
+        // 1. Deploy mock B20 stock
         bCOIN = new MockB20Stock("Coinbase Tokenized Stock", "bCOIN");
 
-        // 2. Deploy BulldotFactory pointing to the LIVE Base Sepolia PoolManager
+        // 2. Deploy BulldotFactory pointing to LIVE Base Sepolia PoolManager
         address[] memory initialStocks = new address[](1);
         initialStocks[0] = address(bCOIN);
 
@@ -57,9 +57,14 @@ contract BaseSepoliaForkTest is Test {
 
         vm.stopPrank();
 
-        // Mint B20 stock to creator and approve factory
+        // Mint B20 stock to creator and buyer
         bCOIN.mint(creator, 500 * 1e18);
+        bCOIN.mint(buyer, 500 * 1e18);
+
         vm.prank(creator);
+        bCOIN.approve(address(factory), type(uint256).max);
+
+        vm.prank(buyer);
         bCOIN.approve(address(factory), type(uint256).max);
     }
 
@@ -75,7 +80,6 @@ contract BaseSepoliaForkTest is Test {
             codeSize := extcodesize(target)
         }
         assertTrue(codeSize > 0, "Uniswap v4 PoolManager bytecode must exist on Base Sepolia");
-        console2.log("Verified Uniswap v4 PoolManager code size on Base Sepolia:", codeSize);
     }
 
     function test_ForkBaseSepolia_InstantPoolLaunchAndPermanentLock() public {
@@ -110,8 +114,49 @@ contract BaseSepoliaForkTest is Test {
         address dead = address(0x000000000000000000000000000000000000dEaD);
         assertEq(bCOIN.balanceOf(dead), expectedNetB20);
         assertEq(BulldotToken(tokenAddr).balanceOf(dead), 1_000_000_000 * 1e18);
+    }
 
-        console2.log("Successfully launched and locked Instant Pool on Base Sepolia Fork!");
-        console2.log("Token:", tokenAddr);
+    function test_ForkBaseSepolia_BondingCurveLaunchAndMigration() public {
+        if (block.chainid != 84532) {
+            console2.log("Not on Base Sepolia fork, skipping bonding curve test.");
+            return;
+        }
+
+        uint16 creatorFeeBps = 100; // 1.0%
+
+        IBulldotFactory.BondingCurveParams memory params = IBulldotFactory.BondingCurveParams({
+            name: "Fork Curve Token",
+            symbol: "FCT",
+            b20Stock: address(bCOIN),
+            feeRecipient: feeRecipient,
+            creatorFeeBps: creatorFeeBps
+        });
+
+        // 1. Launch Curve via Factory
+        vm.prank(creator);
+        (address tokenAddr, address curveAddr) = factory.createBondingCurve(params);
+
+        assertTrue(tokenAddr != address(0));
+        assertTrue(curveAddr != address(0));
+
+        BulldotBondingCurve curve = BulldotBondingCurve(curveAddr);
+
+        // 2. Buy and trade on live fork
+        vm.prank(buyer);
+        bCOIN.approve(curveAddr, type(uint256).max);
+
+        // Buy 70 bCOIN to reach graduation threshold
+        vm.prank(buyer);
+        curve.buy(70 * 1e18, 0, buyer);
+
+        // 3. Verify automatic migration executed on live PoolManager
+        assertTrue(curve.isGraduated(), "Curve must auto-graduate on live fork");
+
+        // Verify permanent lock to dead address
+        address dead = address(0x000000000000000000000000000000000000dEaD);
+        assertTrue(bCOIN.balanceOf(dead) > 0);
+        assertTrue(BulldotToken(tokenAddr).balanceOf(dead) > 0);
+
+        console2.log("Bonding curve successfully auto-migrated to live Uniswap v4 on Base Sepolia!");
     }
 }

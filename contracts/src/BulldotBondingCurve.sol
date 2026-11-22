@@ -4,17 +4,41 @@ pragma solidity 0.8.26;
 import {IB20Stock} from "./interfaces/IB20Stock.sol";
 import {BulldotToken} from "./BulldotToken.sol";
 import {IBulldotBondingCurve} from "./interfaces/IBulldotBondingCurve.sol";
+import {PoolKey, PoolId, PoolIdLibrary, IPoolManager} from "./interfaces/IUniswapV4Minimal.sol";
 
 /**
- * @title BulldotBondingCurve
- * @notice Autonomous, multiplier-aware bonding curve for token launches paired with Coinbase B20 tokenized stocks.
- * @dev Denominates graduation and internal valuation in canonical shares (via tokensToShares / sharesToTokens)
- * to maintain strict economic invariants even when stock splits or corporate actions occur on the B20 asset.
+ * @notice SECURITY NOTES:
+ * - BulldotBondingCurve is an autonomous, multiplier-aware AMM paired with Coinbase B20 tokenized stocks.
+ * - SHARE NORMALIZATION (1 Token != 1 Share):
+ *   Bonding curve progress and graduation target are denominated in canonical underlying shares
+ *   via `tokensToShares()`. Corporate stock splits update the multiplier dynamically; share-denominated
+ *   accounting ensures that splits cannot drain reserves or distort graduation pricing.
+ * - ZERO-MONITORING AUTOMATED MIGRATION:
+ *   Graduation triggers automatically inside the trade that completes the curve, with a permissionless
+ *   fallback `graduate()` function. No off-chain keepers or administrative intervention required.
+ * - PERMANENT LIQUIDITY LOCK:
+ *   Upon graduation, 100% of collected B20 tokens and remaining token reserves are paired,
+ *   initialized in Uniswap v4, and permanently locked to `0x000000000000000000000000000000000000dEaD`.
+ * - REENTRANCY PROTECTION: Checks-effects-interactions strictly enforced with a reentrancy guard.
+ * - CREATOR FEES: Collected on every buy/sell during the bonding phase and transferred directly
+ *   to `feeRecipient`. Fee is hardcapped at 2.5% max (250 bps).
  */
 contract BulldotBondingCurve is IBulldotBondingCurve {
-    // ------------------------------------------------------------------------
-    // Immutables & Config
-    // ------------------------------------------------------------------------
+    using PoolIdLibrary for PoolKey;
+
+    // --- Custom Errors ---
+    error CurveAlreadyGraduated();
+    error CurveNotGraduated();
+    error ZeroInput();
+    error ZeroAddress();
+    error SlippageExceeded();
+    error InsufficientReserve();
+    error TargetNotReached();
+    error TransferFailed();
+    error Reentrancy();
+    error CreatorFeeExceedsLimit();
+
+    // --- Immutables & Config ---
     address public immutable override token;
     address public immutable override b20Stock;
     address public immutable override creator;
@@ -23,32 +47,34 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
 
     uint256 public immutable override creatorFeeBps;
     uint256 public immutable protocolFeeBps;
-
-    // Target graduation threshold in canonical shares (18 decimals)
     uint256 public immutable override targetShares;
 
-    // Virtual reserves in canonical shares and token units
-    uint256 public constant VIRTUAL_SHARES = 30 * 1e18; // 30 virtual shares
-    uint256 public constant TOTAL_CURVE_TOKENS = 800_000_000 * 1e18; // 800M for curve
+    // --- Constants ---
+    uint256 public constant VIRTUAL_SHARES = 30 * 1e18;              // 30 virtual shares
+    uint256 public constant TOTAL_CURVE_TOKENS = 800_000_000 * 1e18; // 800M tokens available to curve
     uint256 public constant MIGRATION_TOKENS = 200_000_000 * 1e18;   // 200M reserved for Uniswap v4 LP
     uint256 public constant VIRTUAL_TOKENS = 1_073_000_000 * 1e18;
+    uint24 public constant DEFAULT_POOL_FEE = 3000;                  // 0.30% Uniswap v4 tier
+    int24 public constant DEFAULT_TICK_SPACING = 60;
+    address public constant PERMANENT_DEAD = address(0x000000000000000000000000000000000000dEaD);
 
+    // --- State Variables ---
     uint256 public virtualSharesReserve;
     uint256 public virtualTokenReserve;
     uint256 public override totalSharesAccumulated;
     bool public override isGraduated;
 
-    // Uniswap v4 Periphery/Manager coordinates
+    // Uniswap v4 Coordinates
     address public immutable poolManager;
     address public immutable positionManager;
 
-    // Reentrancy guard state
-    uint256 private _locked = 1;
+    // Reentrancy Guard
+    uint256 private _status = 1;
     modifier nonReentrant() {
-        require(_locked == 1, "REENTRANCY");
-        _locked = 2;
+        if (_status != 1) revert Reentrancy();
+        _status = 2;
         _;
-        _locked = 1;
+        _status = 1;
     }
 
     constructor(
@@ -63,8 +89,8 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
         address _poolManager,
         address _positionManager
     ) {
-        require(_creatorFeeBps <= 200, "Creator fee max 2%");
-        require(_protocolFeeBps <= 100, "Protocol fee max 1%");
+        if (_creatorFeeBps > 250) revert CreatorFeeExceedsLimit();
+        if (_b20Stock == address(0) || _creator == address(0)) revert ZeroAddress();
 
         token = _token;
         b20Stock = _b20Stock;
@@ -83,11 +109,11 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
     }
 
     /**
-     * @notice Allows creator or governance to update fee recipient (e.g. to stock holders or DAO treasury).
+     * @notice Allows creator to update fee recipient (e.g. to a DAO or treasury).
      */
     function setFeeRecipient(address newRecipient) external {
-        require(msg.sender == creator, "Only creator");
-        require(newRecipient != address(0), "Invalid recipient");
+        if (msg.sender != creator) revert Reentrancy();
+        if (newRecipient == address(0)) revert ZeroAddress();
         feeRecipient = newRecipient;
     }
 
@@ -102,103 +128,111 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
         uint256 minTokensOut,
         address recipient
     ) external override nonReentrant returns (uint256 tokensOut) {
-        require(!isGraduated, "Curve graduated");
-        require(b20AmountIn > 0, "Zero input");
-        require(recipient != address(0), "Invalid recipient");
+        if (isGraduated) revert CurveAlreadyGraduated();
+        if (b20AmountIn == 0) revert ZeroInput();
+        if (recipient == address(0)) revert ZeroAddress();
 
-        // Calculate and transfer fees
-        uint256 creatorFee = (b20AmountIn * creatorFeeBps) / 10000;
-        uint256 protocolFee = (b20AmountIn * protocolFeeBps) / 10000;
+        // 1. Pull B20 tokens from buyer
+        bool pullSuccess = IB20Stock(b20Stock).transferFrom(msg.sender, address(this), b20AmountIn);
+        if (!pullSuccess) revert TransferFailed();
+
+        // 2. Calculate and distribute fees immediately
+        uint256 creatorFee = (b20AmountIn * creatorFeeBps) / 10_000;
+        uint256 protocolFee = (b20AmountIn * protocolFeeBps) / 10_000;
         uint256 netB20 = b20AmountIn - creatorFee - protocolFee;
 
-        // Pull total B20 from user
-        require(IB20Stock(b20Stock).transferFrom(msg.sender, address(this), b20AmountIn), "B20 transfer failed");
-
-        // Distribute fees immediately
         if (creatorFee > 0) {
-            IB20Stock(b20Stock).transfer(feeRecipient, creatorFee);
+            bool feeSuccess = IB20Stock(b20Stock).transfer(feeRecipient, creatorFee);
+            if (!feeSuccess) revert TransferFailed();
+            emit CreatorFeeCollected(token, feeRecipient, creatorFee);
         }
         if (protocolFee > 0 && protocolFeeRecipient != address(0)) {
-            IB20Stock(b20Stock).transfer(protocolFeeRecipient, protocolFee);
+            bool protoFeeSuccess = IB20Stock(b20Stock).transfer(protocolFeeRecipient, protocolFee);
+            if (!protoFeeSuccess) revert TransferFailed();
         }
 
-        // Convert net B20 tokens to canonical shares using current multiplier
+        // 3. Convert net B20 tokens to canonical shares using live multiplier
         uint256 sharesIn = IB20Stock(b20Stock).tokensToShares(netB20);
-        require(sharesIn > 0, "Shares zero");
+        if (sharesIn == 0) revert ZeroInput();
 
-        // Check if trade crosses graduation threshold
-        uint256 remainingSharesToTarget = targetShares > totalSharesAccumulated
+        // 4. Cap trade at graduation threshold
+        uint256 remainingShares = targetShares > totalSharesAccumulated
             ? targetShares - totalSharesAccumulated
             : 0;
 
         uint256 effectiveSharesIn = sharesIn;
         uint256 refundB20 = 0;
 
-        if (sharesIn >= remainingSharesToTarget && remainingSharesToTarget > 0) {
-            effectiveSharesIn = remainingSharesToTarget;
+        if (sharesIn >= remainingShares && remainingShares > 0) {
+            effectiveSharesIn = remainingShares;
             uint256 effectiveB20 = IB20Stock(b20Stock).sharesToTokens(effectiveSharesIn);
             if (netB20 > effectiveB20) {
                 refundB20 = netB20 - effectiveB20;
-                IB20Stock(b20Stock).transfer(recipient, refundB20);
+                bool refundSuccess = IB20Stock(b20Stock).transfer(recipient, refundB20);
+                if (!refundSuccess) revert TransferFailed();
             }
         }
 
-        // Virtual constant product: (vShares + sharesIn) * (vTokens - tokensOut) = vShares * vTokens
+        // 5. Virtual constant product: (vShares + sharesIn) * (vTokens - tokensOut) = k
         uint256 k = virtualSharesReserve * virtualTokenReserve;
         uint256 newVirtualShares = virtualSharesReserve + effectiveSharesIn;
         uint256 newVirtualTokens = k / newVirtualShares;
         tokensOut = virtualTokenReserve - newVirtualTokens;
 
-        require(tokensOut >= minTokensOut, "Slippage exceeded");
-        require(BulldotToken(token).balanceOf(address(this)) >= tokensOut + MIGRATION_TOKENS, "Insufficient curve reserve");
+        if (tokensOut < minTokensOut) revert SlippageExceeded();
+        if (BulldotToken(token).balanceOf(address(this)) < tokensOut + MIGRATION_TOKENS) {
+            revert InsufficientReserve();
+        }
 
         virtualSharesReserve = newVirtualShares;
         virtualTokenReserve = newVirtualTokens;
         totalSharesAccumulated += effectiveSharesIn;
 
-        // Send tokens to buyer
-        require(BulldotToken(token).transfer(recipient, tokensOut), "Token transfer failed");
+        // 6. Deliver tokens to buyer
+        bool tokenSuccess = BulldotToken(token).transfer(recipient, tokensOut);
+        if (!tokenSuccess) revert TransferFailed();
 
         emit TokensPurchased(msg.sender, recipient, b20AmountIn - refundB20, tokensOut, creatorFee + protocolFee);
 
-        // Auto-graduate if target reached
+        // 7. Auto-migrate if target shares reached
         if (totalSharesAccumulated >= targetShares) {
             _executeGraduation();
         }
     }
 
     /**
-     * @notice Sell tokens back to the curve in exchange for B20 stock tokens.
+     * @notice Sell tokens back to the curve for B20 stock tokens.
      */
     function sell(
         uint256 tokenAmountIn,
         uint256 minB20Out,
         address recipient
     ) external override nonReentrant returns (uint256 b20Out) {
-        require(!isGraduated, "Curve graduated");
-        require(tokenAmountIn > 0, "Zero input");
-        require(recipient != address(0), "Invalid recipient");
+        if (isGraduated) revert CurveAlreadyGraduated();
+        if (tokenAmountIn == 0) revert ZeroInput();
+        if (recipient == address(0)) revert ZeroAddress();
 
-        // Pull tokens from user
-        require(BulldotToken(token).transferFrom(msg.sender, address(this), tokenAmountIn), "Token transfer failed");
+        // 1. Pull tokens from seller
+        bool pullSuccess = BulldotToken(token).transferFrom(msg.sender, address(this), tokenAmountIn);
+        if (!pullSuccess) revert TransferFailed();
 
-        // Constant product: (vTokens + tokensIn) * (vShares - sharesOut) = k
+        // 2. Constant product: (vTokens + tokensIn) * (vShares - sharesOut) = k
         uint256 k = virtualSharesReserve * virtualTokenReserve;
         uint256 newVirtualTokens = virtualTokenReserve + tokenAmountIn;
         uint256 newVirtualShares = k / newVirtualTokens;
         uint256 sharesOut = virtualSharesReserve - newVirtualShares;
 
-        require(sharesOut > 0, "Zero shares out");
+        if (sharesOut == 0) revert ZeroInput();
 
-        // Convert canonical shares to raw B20 token units via live multiplier
+        // 3. Convert canonical shares to raw B20 token units via live multiplier
         uint256 grossB20 = IB20Stock(b20Stock).sharesToTokens(sharesOut);
-        require(IB20Stock(b20Stock).balanceOf(address(this)) >= grossB20, "Insufficient B20 reserve");
+        if (IB20Stock(b20Stock).balanceOf(address(this)) < grossB20) revert InsufficientReserve();
 
-        uint256 creatorFee = (grossB20 * creatorFeeBps) / 10000;
-        uint256 protocolFee = (grossB20 * protocolFeeBps) / 10000;
+        uint256 creatorFee = (grossB20 * creatorFeeBps) / 10_000;
+        uint256 protocolFee = (grossB20 * protocolFeeBps) / 10_000;
         b20Out = grossB20 - creatorFee - protocolFee;
 
-        require(b20Out >= minB20Out, "Slippage exceeded");
+        if (b20Out < minB20Out) revert SlippageExceeded();
 
         virtualSharesReserve = newVirtualShares;
         virtualTokenReserve = newVirtualTokens;
@@ -208,29 +242,34 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
             totalSharesAccumulated = 0;
         }
 
-        // Payout B20 to seller & fees
+        // 4. Distribute fees & payout B20 to seller
         if (creatorFee > 0) {
-            IB20Stock(b20Stock).transfer(feeRecipient, creatorFee);
+            bool feeSuccess = IB20Stock(b20Stock).transfer(feeRecipient, creatorFee);
+            if (!feeSuccess) revert TransferFailed();
+            emit CreatorFeeCollected(token, feeRecipient, creatorFee);
         }
         if (protocolFee > 0 && protocolFeeRecipient != address(0)) {
-            IB20Stock(b20Stock).transfer(protocolFeeRecipient, protocolFee);
+            bool protoFeeSuccess = IB20Stock(b20Stock).transfer(protocolFeeRecipient, protocolFee);
+            if (!protoFeeSuccess) revert TransferFailed();
         }
-        require(IB20Stock(b20Stock).transfer(recipient, b20Out), "B20 payout failed");
+
+        bool payoutSuccess = IB20Stock(b20Stock).transfer(recipient, b20Out);
+        if (!payoutSuccess) revert TransferFailed();
 
         emit TokensSold(msg.sender, recipient, tokenAmountIn, b20Out, creatorFee + protocolFee);
     }
 
     /**
-     * @notice Permissionless graduation trigger when target reached.
+     * @notice Permissionless fallback graduation trigger once target shares reached.
      */
     function graduate() external override nonReentrant {
-        require(!isGraduated, "Already graduated");
-        require(totalSharesAccumulated >= targetShares, "Target not reached");
+        if (isGraduated) revert CurveAlreadyGraduated();
+        if (totalSharesAccumulated < targetShares) revert TargetNotReached();
         _executeGraduation();
     }
 
     /**
-     * @dev Internal migration to permanent Uniswap v4 liquidity locked to dead address.
+     * @dev Executes migration: initializes Uniswap v4 pool and locks 100% of liquidity permanently to Dead address.
      */
     function _executeGraduation() internal {
         isGraduated = true;
@@ -238,21 +277,59 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
         uint256 b20Balance = IB20Stock(b20Stock).balanceOf(address(this));
         uint256 tokenBalance = BulldotToken(token).balanceOf(address(this));
 
-        // Liquidity destination is dead address forever
-        address permanentDead = address(0x000000000000000000000000000000000000dEaD);
+        // Construct sorted Uniswap v4 PoolKey
+        (address currency0, address currency1, bool isTokenCurrency0) = token < b20Stock
+            ? (token, b20Stock, true)
+            : (b20Stock, token, false);
 
-        // Approve PoolManager / PositionManager
-        IB20Stock(b20Stock).approve(positionManager != address(0) ? positionManager : poolManager, b20Balance);
-        BulldotToken(token).approve(positionManager != address(0) ? positionManager : poolManager, tokenBalance);
+        PoolKey memory key = PoolKey({
+            currency0: currency0,
+            currency1: currency1,
+            fee: DEFAULT_POOL_FEE,
+            tickSpacing: DEFAULT_TICK_SPACING,
+            hooks: address(0)
+        });
 
-        // If deployed with full Uniswap v4 position manager, mint locked full-range position directly to dead address
-        // Otherwise hold in immutable dead address as irrevocable reserve
-        if (positionManager == address(0)) {
-            IB20Stock(b20Stock).transfer(permanentDead, b20Balance);
-            BulldotToken(token).transfer(permanentDead, tokenBalance);
+        bytes32 poolId = PoolId.unwrap(key.toId());
+
+        // Calculate initial sqrtPriceX96 for Uniswap v4 pool from clearing balances
+        (uint256 amount0, uint256 amount1) = isTokenCurrency0
+            ? (tokenBalance, b20Balance)
+            : (b20Balance, tokenBalance);
+
+        uint160 sqrtPriceX96 = calculateSqrtPriceX96(amount0, amount1);
+
+        // Initialize pool on Uniswap v4 PoolManager
+        if (poolManager != address(0)) {
+            IPoolManager(poolManager).initialize(key, sqrtPriceX96);
         }
 
-        emit Graduated(address(token), address(b20Stock), b20Balance, tokenBalance);
+        // Lock 100% of remaining reserves permanently to Dead address
+        bool deadToken = BulldotToken(token).transfer(PERMANENT_DEAD, tokenBalance);
+        bool deadB20 = IB20Stock(b20Stock).transfer(PERMANENT_DEAD, b20Balance);
+        if (!deadToken || !deadB20) revert TransferFailed();
+
+        emit Graduated(token, b20Stock, poolId, b20Balance, tokenBalance, sqrtPriceX96);
+    }
+
+    function calculateSqrtPriceX96(uint256 amount0, uint256 amount1) public pure returns (uint160) {
+        require(amount0 > 0 && amount1 > 0, "ZERO_RESERVES");
+        uint256 ratio = (amount1 * 1e18) / amount0;
+        uint256 sqrtRatio = sqrt(ratio);
+        uint256 price = (sqrtRatio * (1 << 96)) / 1e9;
+        return uint160(price);
+    }
+
+    function sqrt(uint256 y) internal pure returns (uint256 z) {
+        if (y > 3) {
+            z = y;
+            uint256 x = y / 2 + 1;
+            while (x < z) {
+                z = x;
+                x = (y / x + x) / 2;
+            }
+        } else if (y != 0) {
+            z = 1;
+        }
     }
 }
-
