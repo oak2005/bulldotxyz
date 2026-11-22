@@ -235,8 +235,9 @@ contract BulldotRouter is IUnlockCallback {
             if (!ok) revert TransferFailed();
         }
 
-        // If swap failed to deliver minAmountOut, refund tokenIn to user and revert
+        // If swap failed to deliver minAmountOut, refund tokenIn to user, reset allowance and revert
         if (amountOut < minAmountOut) {
+            BulldotToken(tokenIn).approve(poolManager, 0);
             uint256 remainingIn = BulldotToken(tokenIn).balanceOf(address(this));
             if (remainingIn > 0) {
                 bool okIn = BulldotToken(tokenIn).transfer(msg.sender, remainingIn);
