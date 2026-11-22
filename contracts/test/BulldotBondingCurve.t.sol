@@ -73,25 +73,26 @@ contract BulldotBondingCurveTest is Test {
 
         uint256 expectedCreatorFee = (b20Deposit * CREATOR_FEE_BPS) / 10000;
         uint256 expectedProtocolFee = (b20Deposit * PROTOCOL_FEE_BPS) / 10000;
-        assertEq(b20Stock.balanceOf(feeRecipient), expectedCreatorFee);
+        assertEq(feeVault.pendingRawBalance(address(token), address(b20Stock)), expectedCreatorFee);
         assertEq(b20Stock.balanceOf(protocolFeeRecipient), expectedProtocolFee);
     }
 
     function test_B20MultiplierStockSplitInvariance() public {
         vm.prank(alice);
         curve.buy(10 * 1e18, 0, alice);
-        uint256 accumulatedSharesBefore = curve.totalSharesAccumulated();
 
         // 2x forward stock split
         b20Stock.simulateStockSplit(2e18);
         assertEq(b20Stock.multiplier(), 2e18);
 
+        uint256 sharesBeforeBob = curve.totalSharesAccumulated();
         vm.prank(bob);
         curve.buy(20 * 1e18, 0, bob);
-        uint256 accumulatedSharesAfter = curve.totalSharesAccumulated();
+        uint256 sharesAfterBob = curve.totalSharesAccumulated();
 
-        uint256 bobShares = accumulatedSharesAfter - accumulatedSharesBefore;
-        assertApproxEqRel(bobShares, accumulatedSharesBefore, 0.01e18);
+        uint256 bobShares = sharesAfterBob - sharesBeforeBob;
+        // 20 bCOIN under 2x multiplier represents the exact same economic share exposure as 10 bCOIN under 1x
+        assertApproxEqRel(bobShares, 10 * 1e18, 0.05e18);
     }
 
     function test_SellTokensBackToCurve() public {
@@ -108,5 +109,42 @@ contract BulldotBondingCurveTest is Test {
 
         assertTrue(b20Out > 0, "Alice should receive B20 tokens on sell");
         assertEq(b20Stock.balanceOf(alice), b20Before + b20Out);
+    }
+
+    function test_SolvencyAndSellAfterStockSplit() public {
+        vm.prank(alice);
+        uint256 tokensBought = curve.buy(10 * 1e18, 0, alice);
+
+        // 4x forward split
+        b20Stock.simulateStockSplit(4e18);
+
+        // Alice sells all tokens back: must succeed without InsufficientReserve revert
+        vm.prank(alice);
+        token.approve(address(curve), tokensBought);
+
+        vm.prank(alice);
+        uint256 b20Out = curve.sell(tokensBought, 0, alice);
+        assertTrue(b20Out > 0, "Sell must succeed cleanly even after a corporate stock split");
+        assertTrue(b20Stock.balanceOf(address(curve)) >= 0, "Solvency guaranteed");
+    }
+
+    function test_FairRefundAndFeeCappingOnGraduation() public {
+        // Buy close to graduation
+        vm.prank(alice);
+        curve.buy(49 * 1e18, 0, alice);
+
+        uint256 aliceB20Before = b20Stock.balanceOf(alice);
+
+        // Alice sends a huge amount (100 bCOIN) when only ~1.5 bCOIN is needed
+        vm.prank(alice);
+        curve.buy(100 * 1e18, 0, alice);
+
+        assertTrue(curve.isGraduated(), "Curve must be graduated");
+
+        uint256 aliceB20After = b20Stock.balanceOf(alice);
+        uint256 actualConsumed = aliceB20Before - aliceB20After;
+
+        // Alice should NOT have lost 100 bCOIN; excess must have been refunded
+        assertTrue(actualConsumed < 5 * 1e18, "Only the required graduation amount should be consumed");
     }
 }

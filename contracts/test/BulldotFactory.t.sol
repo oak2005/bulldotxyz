@@ -153,14 +153,12 @@ contract BulldotFactoryTest is Test {
         vm.prank(buyer);
         bCOIN.approve(curveAddr, type(uint256).max);
 
-        uint256 feeRecipientBefore = bCOIN.balanceOf(feeRecipient);
-
         vm.prank(buyer);
         uint256 tokensReceived = curve.buy(buyAmount, 0, buyer);
 
         assertTrue(tokensReceived > 0, "Buyer should receive tokens");
         uint256 expectedCreatorFee = (buyAmount * creatorFeeBps) / 10_000;
-        assertEq(bCOIN.balanceOf(feeRecipient), feeRecipientBefore + expectedCreatorFee, "Creator fee must be paid on buy");
+        assertEq(feeVault.pendingRawBalance(tokenAddr, address(bCOIN)), expectedCreatorFee, "Creator fee buffered in feeVault for claim");
 
         uint256 remainingB20Needed = 60 * 1e18;
         vm.prank(buyer);

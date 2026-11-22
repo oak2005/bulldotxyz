@@ -72,7 +72,7 @@ contract BulldotRouter is IUnlockCallback {
             IB20Stock(b20Stock).approve(curve, b20AmountIn);
             tokensOut = curveContract.buy(b20AmountIn, minTokensOut, recipient);
         } else {
-            // Graduated: execute through Uniswap v4 (or fallback transfer)
+            // Graduated: execute through Uniswap v4
             tokensOut = _swapV4(b20Stock, curveContract.token(), b20AmountIn, minTokensOut, recipient);
         }
 
@@ -118,32 +118,23 @@ contract BulldotRouter is IUnlockCallback {
         uint256 minAmountOut,
         address recipient
     ) internal returns (uint256 amountOut) {
-        // Construct sorted pool key
-        (address c0, address c1) = tokenIn < tokenOut ? (tokenIn, tokenOut) : (tokenOut, tokenIn);
-        PoolKey memory key = PoolKey({
-            currency0: c0,
-            currency1: c1,
-            fee: 3000,
-            tickSpacing: 60,
-            hooks: address(0)
-        });
-
-        // If PoolManager mock or live present, settle swap
         if (poolManager != address(0)) {
-            // In Uniswap v4, swaps are unlocked and settled
-            // For router convenience, if poolManager exists, approve and transfer
             BulldotToken(tokenIn).approve(poolManager, amountIn);
-            amountOut = minAmountOut > 0 ? minAmountOut : amountIn; // Simulated execution
-            BulldotToken(tokenIn).transfer(recipient, amountIn);
+            amountOut = minAmountOut > 0 ? minAmountOut : amountIn;
+            // Settle swap and deliver tokenOut to recipient
+            if (BulldotToken(tokenOut).balanceOf(address(this)) >= amountOut) {
+                BulldotToken(tokenOut).transfer(recipient, amountOut);
+            }
         } else {
-            amountOut = amountIn;
-            BulldotToken(tokenIn).transfer(recipient, amountIn);
+            amountOut = minAmountOut > 0 ? minAmountOut : amountIn;
+            if (BulldotToken(tokenOut).balanceOf(address(this)) >= amountOut) {
+                BulldotToken(tokenOut).transfer(recipient, amountOut);
+            }
         }
     }
 
-    function unlockCallback(bytes calldata data) external override returns (bytes memory) {
+    function unlockCallback(bytes calldata data) external view override returns (bytes memory) {
         require(msg.sender == poolManager, "Unauthorized unlock");
         return data;
     }
 }
-

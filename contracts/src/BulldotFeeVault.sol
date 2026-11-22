@@ -11,6 +11,9 @@ import {IB20Stock} from "./interfaces/IB20Stock.sol";
  * - MULTIPLIER-AWARE ACCOUNTING: Tracks all B20 stock fee deposits in both raw ERC-20 token units
  *   and normalized canonical shares (`tokensToShares()`). This guarantees that corporate stock splits
  *   (e.g. 2-for-1 or 4-for-1 forward splits) do not distort historical or claimable accounting.
+ * - GRACEFUL BUFFERING: If auto-forward to a fee recipient fails (e.g. recipient is a contract without
+ *   fallback or has restricted transfers), fees are safely buffered in `pendingRawBalance` rather than
+ *   reverting and disrupting core trading flows.
  * - REENTRANCY & CEI: Strictly enforces checks-effects-interactions and is nonReentrant.
  */
 contract BulldotFeeVault {
@@ -46,6 +49,8 @@ contract BulldotFeeVault {
     );
 
     // --- State Variables ---
+    address public factory;
+
     mapping(address => address) public feeRecipients;
     mapping(address => address) public tokenManagers;
 
@@ -62,16 +67,36 @@ contract BulldotFeeVault {
         _status = 1;
     }
 
+    constructor() {
+        factory = msg.sender;
+    }
+
+    /**
+     * @notice Allows factory assignment once if uninitialized.
+     */
+    function setFactory(address _factory) external {
+        if (factory == address(0) || factory == msg.sender) {
+            factory = _factory;
+        } else {
+            revert Unauthorized();
+        }
+    }
+
     /**
      * @notice Registers a launched token with an initial fee recipient and manager.
      */
     function registerToken(address token, address initialRecipient, address manager) external {
         if (token == address(0) || initialRecipient == address(0)) revert ZeroAddress();
-        if (tokenManagers[token] == address(0)) {
-            tokenManagers[token] = manager == address(0) ? initialRecipient : manager;
-            feeRecipients[token] = initialRecipient;
-            emit FeeRecipientRedirected(token, address(0), initialRecipient);
+        if (tokenManagers[token] != address(0)) return; // Already registered
+
+        // Prevent front-running: factory, designated manager, or verified deployed contract
+        if (factory != address(0) && msg.sender != factory && msg.sender != manager && token.code.length == 0) {
+            revert Unauthorized();
         }
+
+        tokenManagers[token] = manager == address(0) ? initialRecipient : manager;
+        feeRecipients[token] = initialRecipient;
+        emit FeeRecipientRedirected(token, address(0), initialRecipient);
     }
 
     /**
@@ -104,6 +129,7 @@ contract BulldotFeeVault {
         if (recipient == address(0)) {
             recipient = fallbackRecipient == address(0) ? msg.sender : fallbackRecipient;
             feeRecipients[token] = recipient;
+            tokenManagers[token] = recipient;
         }
 
         // 1. Pull B20 fee from sender
@@ -126,12 +152,20 @@ contract BulldotFeeVault {
 
         emit FeeDeposited(token, stock, recipient, rawAmount, shareAmount, currentMultiplier);
 
-        // 4. Auto-forward or hold for claim
+        // 4. Auto-forward or buffer for claim
         if (autoForward) {
-            totalRawClaimed[token][stock] += rawAmount;
-            bool sendSuccess = IB20Stock(stock).transfer(recipient, rawAmount);
-            if (!sendSuccess) revert TransferFailed();
-            emit FeeClaimed(token, stock, recipient, rawAmount, shareAmount);
+            bool sendSuccess = false;
+            try IB20Stock(stock).transfer(recipient, rawAmount) returns (bool ok) {
+                sendSuccess = ok;
+            } catch {}
+
+            if (sendSuccess) {
+                totalRawClaimed[token][stock] += rawAmount;
+                emit FeeClaimed(token, stock, recipient, rawAmount, shareAmount);
+            } else {
+                // Buffer safely in vault if recipient is unpayable/blocked
+                pendingRawBalance[token][stock] += rawAmount;
+            }
         } else {
             pendingRawBalance[token][stock] += rawAmount;
         }

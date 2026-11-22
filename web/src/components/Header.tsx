@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount, useChainId, useSwitchChain } from 'wagmi';
 import { base, baseSepolia } from 'wagmi/chains';
+import { AlertTriangle } from 'lucide-react';
 
 export function Header() {
   const pathname = usePathname();
@@ -14,6 +15,8 @@ export function Header() {
   const { isConnected } = useAccount();
 
   const isSepolia = chainId === baseSepolia.id;
+  const isMainnet = chainId === base.id;
+  const isSupported = isSepolia || isMainnet;
 
   const navLinks = [
     { label: 'Trade / Swap', href: '/' },
@@ -58,18 +61,31 @@ export function Header() {
         {/* Right Actions: Network Badge & Connect Button */}
         <div className="flex items-center space-x-3">
           {isConnected && (
-            <button
-              onClick={() => switchChain?.({ chainId: isSepolia ? base.id : baseSepolia.id })}
-              className={`hidden sm:flex items-center space-x-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium border transition-colors ${
-                isSepolia
-                  ? 'bg-amber-950/40 text-amber-300 border-amber-800/60 hover:bg-amber-900/40'
-                  : 'bg-blue-950/40 text-blue-300 border-blue-800/60 hover:bg-blue-900/40'
-              }`}
-              title="Click to toggle between Base Sepolia and Base Mainnet"
-            >
-              <span className={`w-2 h-2 rounded-full ${isSepolia ? 'bg-amber-400' : 'bg-blue-400'} animate-pulse`} />
-              <span>{isSepolia ? 'Base Sepolia' : 'Base Mainnet'}</span>
-            </button>
+            <>
+              {!isSupported ? (
+                <button
+                  onClick={() => switchChain?.({ chainId: baseSepolia.id })}
+                  className="flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-red-950/60 text-red-300 border border-red-800 hover:bg-red-900/60 transition-colors"
+                  title="Unsupported Network! Click to switch to Base Sepolia"
+                >
+                  <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
+                  <span>Switch to Base</span>
+                </button>
+              ) : (
+                <button
+                  onClick={() => switchChain?.({ chainId: isSepolia ? base.id : baseSepolia.id })}
+                  className={`hidden sm:flex items-center space-x-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                    isSepolia
+                      ? 'bg-amber-950/40 text-amber-300 border-amber-800/60 hover:bg-amber-900/40'
+                      : 'bg-blue-950/40 text-blue-300 border-blue-800/60 hover:bg-blue-900/40'
+                  }`}
+                  title="Click to toggle between Base Sepolia and Base Mainnet"
+                >
+                  <span className={`w-2 h-2 rounded-full ${isSepolia ? 'bg-amber-400' : 'bg-blue-400'} animate-pulse`} />
+                  <span>{isSepolia ? 'Base Sepolia' : 'Base Mainnet'}</span>
+                </button>
+              )}
+            </>
           )}
 
           <ConnectButton
@@ -85,4 +101,3 @@ export function Header() {
     </header>
   );
 }
-

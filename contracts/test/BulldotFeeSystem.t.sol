@@ -135,14 +135,14 @@ contract BulldotFeeSystemTest is Test {
         (
             uint256 rawReceived1,
             uint256 sharesReceived1,
-            uint256 rawClaimed1,
             ,
+            uint256 pending1,
             uint256 mult1
         ) = feeVault.getFeeMetrics(tokenAddr, address(bCOIN));
 
         assertEq(rawReceived1, fee1);
         assertEq(sharesReceived1, fee1); // 1 token = 1 share at 1.0x
-        assertEq(rawClaimed1, fee1);
+        assertEq(pending1, fee1);
         assertEq(mult1, 1e18);
 
         // 3. Corporate Action: 2-for-1 forward stock split on Coinbase stock
@@ -171,6 +171,7 @@ contract BulldotFeeSystemTest is Test {
 
     function test_ZeroAdminInterventionForFeeClaiming() public {
         address token = address(0x999);
+        vm.prank(creator);
         feeVault.registerToken(token, creator, creator);
 
         // Deposit fee into accumulate mode (autoForward = false)

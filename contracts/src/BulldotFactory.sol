@@ -19,7 +19,7 @@ import {PoolKey, PoolId, PoolIdLibrary, IPoolManager, IPositionManager} from "./
  *   Integrates with BulldotFeeVault to route creator fees on both Instant and Curve launch modes.
  *   Enables transparent tracking of raw B20 token fees alongside normalized share values.
  * - PERMANENT LIQUIDITY LOCK: All liquidity created by instant mode or bonding curve graduation is irreversibly
- *   locked to `address(0x000000000000000000000000000000000000dEaD)`. No withdrawal hooks exist anywhere.
+ *   minted/locked to `address(0x000000000000000000000000000000000000dEaD)`. No withdrawal hooks exist anywhere.
  * - MINIMAL LOCKED-DOWN ADMIN: Owner powers are strictly limited to updating the B20 registry/allowlist
  *   and protocol fee recipient. Owner CANNOT touch user funds, pause trading, or alter token supply.
  *   Ownership can be renounced via `renounceOwnership()`.
@@ -36,7 +36,11 @@ contract BulldotFactory is IBulldotFactory {
     error TransferFailed();
     error Reentrancy();
 
-    // --- Constants ---
+    // --- Uniswap v4 Constants ---
+    uint160 internal constant MIN_SQRT_RATIO = 4295128739;
+    uint160 internal constant MAX_SQRT_RATIO = 1461446703485210103287273052203988822378723970342;
+    int24 internal constant TICK_LOWER = -887220;
+    int24 internal constant TICK_UPPER = 887220;
     uint16 public constant MAX_CREATOR_FEE_BPS = 250; // Max 2.5%
     uint24 public constant DEFAULT_POOL_FEE = 3000;    // 0.30% Uniswap v4 standard tier
     int24 public constant DEFAULT_TICK_SPACING = 60;
@@ -151,7 +155,10 @@ contract BulldotFactory is IBulldotFactory {
         if (creatorFee > 0) {
             if (feeVault != address(0)) {
                 IB20Stock(params.b20Stock).approve(feeVault, creatorFee);
-                BulldotFeeVault(feeVault).depositFee(tokenAddr, params.b20Stock, creatorFee, true);
+                try BulldotFeeVault(feeVault).depositFee(tokenAddr, params.b20Stock, creatorFee, true) {} catch {
+                    bool feeSuccess = IB20Stock(params.b20Stock).transfer(params.feeRecipient, creatorFee);
+                    if (!feeSuccess) revert TransferFailed();
+                }
             } else {
                 bool feeSuccess = IB20Stock(params.b20Stock).transfer(params.feeRecipient, creatorFee);
                 if (!feeSuccess) revert TransferFailed();
@@ -186,10 +193,34 @@ contract BulldotFactory is IBulldotFactory {
         // 7. Initialize Uniswap v4 Pool
         IPoolManager(poolManager).initialize(key, sqrtPriceX96);
 
-        // 8. Permanently Lock Liquidity to Dead address
-        bool deadTransferToken = token.transfer(PERMANENT_DEAD, tokenAmountForPool);
-        bool deadTransferB20 = IB20Stock(params.b20Stock).transfer(PERMANENT_DEAD, netB20ForPool);
-        if (!deadTransferToken || !deadTransferB20) revert TransferFailed();
+        // 8. Permanently Lock Liquidity in Uniswap v4 or fallback to Dead address
+        if (positionManager != address(0)) {
+            token.approve(positionManager, tokenAmountForPool);
+            IB20Stock(params.b20Stock).approve(positionManager, netB20ForPool);
+
+            IPositionManager.MintParams memory mintParams = IPositionManager.MintParams({
+                poolKey: key,
+                tickLower: TICK_LOWER,
+                tickUpper: TICK_UPPER,
+                liquidity: 0,
+                amount0Max: uint128(amount0),
+                amount1Max: uint128(amount1),
+                recipient: PERMANENT_DEAD,
+                hookData: ""
+            });
+
+            try IPositionManager(positionManager).mint(mintParams) {
+                // Successfully locked!
+            } catch {
+                bool deadTransferToken = token.transfer(PERMANENT_DEAD, token.balanceOf(address(this)));
+                bool deadTransferB20 = IB20Stock(params.b20Stock).transfer(PERMANENT_DEAD, IB20Stock(params.b20Stock).balanceOf(address(this)));
+                if (!deadTransferToken || !deadTransferB20) revert TransferFailed();
+            }
+        } else {
+            bool deadTransferToken = token.transfer(PERMANENT_DEAD, tokenAmountForPool);
+            bool deadTransferB20 = IB20Stock(params.b20Stock).transfer(PERMANENT_DEAD, netB20ForPool);
+            if (!deadTransferToken || !deadTransferB20) revert TransferFailed();
+        }
 
         // 9. Emit indexing event
         emit InstantPoolLaunched(
@@ -270,6 +301,8 @@ contract BulldotFactory is IBulldotFactory {
         uint256 ratio = (amount1 * 1e18) / amount0;
         uint256 sqrtRatio = sqrt(ratio);
         uint256 price = (sqrtRatio * (1 << 96)) / 1e9;
+        if (price < MIN_SQRT_RATIO) price = MIN_SQRT_RATIO + 1;
+        if (price > MAX_SQRT_RATIO) price = MAX_SQRT_RATIO - 1;
         return uint160(price);
     }
 
