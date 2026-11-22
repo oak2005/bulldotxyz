@@ -4,6 +4,7 @@ pragma solidity 0.8.26;
 import {Test, console2} from "forge-std/Test.sol";
 import {BulldotToken} from "../src/BulldotToken.sol";
 import {BulldotBondingCurve} from "../src/BulldotBondingCurve.sol";
+import {IBulldotBondingCurve} from "../src/interfaces/IBulldotBondingCurve.sol";
 import {BulldotFeeVault} from "../src/BulldotFeeVault.sol";
 import {MockB20Stock} from "../src/mocks/MockB20Stock.sol";
 
@@ -39,6 +40,7 @@ contract BulldotBondingCurveTest is Test {
             CREATOR_FEE_BPS,
             PROTOCOL_FEE_BPS,
             TARGET_SHARES,
+            0, // Default no max wallet cap
             address(0),
             address(0)
         );
@@ -146,5 +148,41 @@ contract BulldotBondingCurveTest is Test {
 
         // Alice should NOT have lost 100 bCOIN; excess must have been refunded
         assertTrue(actualConsumed < 5 * 1e18, "Only the required graduation amount should be consumed");
+    }
+
+    function test_AntiSniperMaxWalletLimit() public {
+        // Deploy curve with 2% max wallet limit (200 bps = 16M tokens)
+        BulldotToken token2 = new BulldotToken("ANTI SNIPER", "ASNP", address(this));
+        BulldotBondingCurve curve2 = new BulldotBondingCurve(
+            address(token2),
+            address(b20Stock),
+            creator,
+            feeRecipient,
+            protocolFeeRecipient,
+            address(feeVault),
+            CREATOR_FEE_BPS,
+            PROTOCOL_FEE_BPS,
+            TARGET_SHARES,
+            200, // 2% max wallet cap
+            address(0),
+            address(0)
+        );
+        token2.transfer(address(curve2), token2.totalSupply());
+
+        assertEq(curve2.maxWalletTokens(), (800_000_000 * 1e18 * 200) / 10_000);
+
+        // Buying a reasonable amount passes
+        vm.prank(alice);
+        b20Stock.approve(address(curve2), type(uint256).max);
+        vm.prank(alice);
+        curve2.buy(0.1 * 1e18, 0, alice);
+        assertTrue(token2.balanceOf(alice) > 0);
+
+        // A sniper attempting to buy 10 bCOIN (exceeding 2% cap) reverts
+        vm.prank(bob);
+        b20Stock.approve(address(curve2), type(uint256).max);
+        vm.prank(bob);
+        vm.expectRevert(IBulldotBondingCurve.MaxWalletExceeded.selector);
+        curve2.buy(10 * 1e18, 0, bob);
     }
 }

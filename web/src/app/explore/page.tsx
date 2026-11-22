@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { VERIFIED_B20_STOCKS } from '../../config/stocks';
-import { ShieldCheck, Flame, Rocket, ExternalLink, ArrowRight } from 'lucide-react';
+import { ShieldCheck, Flame, Rocket, ExternalLink, ArrowRight, CheckCircle2, Lock, Droplets } from 'lucide-react';
 import Link from 'next/link';
 
 interface LaunchedTokenItem {
@@ -14,6 +14,7 @@ interface LaunchedTokenItem {
   marketCapB20: string;
   creatorFee: number;
   isVerified: boolean;
+  isTreasuryAligned: boolean;
 }
 
 const MOCK_TOKENS: LaunchedTokenItem[] = [
@@ -21,11 +22,12 @@ const MOCK_TOKENS: LaunchedTokenItem[] = [
     name: 'Bull Protocol',
     symbol: 'BULL',
     pairStock: 'bCOIN',
-    mode: 'CURVE',
-    progress: 74,
-    marketCapB20: '37.0 bCOIN (~$11,560)',
+    mode: 'GRADUATED',
+    progress: 100,
+    marketCapB20: '50.0 bCOIN (~$15,625)',
     creatorFee: 1.0,
     isVerified: true,
+    isTreasuryAligned: true,
   },
   {
     name: 'Nvidia Meme Moon',
@@ -36,6 +38,7 @@ const MOCK_TOKENS: LaunchedTokenItem[] = [
     marketCapB20: '50.0 bNVDA (~$7,110)',
     creatorFee: 1.5,
     isVerified: true,
+    isTreasuryAligned: true,
   },
   {
     name: 'Apple Autonomous',
@@ -46,6 +49,7 @@ const MOCK_TOKENS: LaunchedTokenItem[] = [
     marketCapB20: '25.0 bAAPL (~$5,645)',
     creatorFee: 1.0,
     isVerified: true,
+    isTreasuryAligned: false,
   },
   {
     name: 'Tesla Cybertruck Club',
@@ -53,18 +57,36 @@ const MOCK_TOKENS: LaunchedTokenItem[] = [
     pairStock: 'bTSLA',
     mode: 'CURVE',
     progress: 32,
-    marketCapB20: '16.0 bTSLA (~$3,600)',
+    marketCapB20: '16.0 bTSLA (~$3,440)',
     creatorFee: 2.0,
     isVerified: true,
+    isTreasuryAligned: false,
+  },
+  {
+    name: 'Treasury Share Token',
+    symbol: 'TST',
+    pairStock: 'bCOIN',
+    mode: 'INSTANT',
+    progress: 100,
+    marketCapB20: '20.0 bCOIN (~$6,250)',
+    creatorFee: 2.0,
+    isVerified: true,
+    isTreasuryAligned: true,
   },
 ];
 
 export default function ExplorePage() {
   const [filterStock, setFilterStock] = useState('ALL');
+  const [filterMode, setFilterMode] = useState<'ALL' | 'V4' | 'CURVE'>('ALL');
 
-  const filtered = filterStock === 'ALL'
-    ? MOCK_TOKENS
-    : MOCK_TOKENS.filter((t) => t.pairStock === filterStock);
+  const filtered = MOCK_TOKENS.filter((t) => {
+    const stockMatch = filterStock === 'ALL' || t.pairStock === filterStock;
+    const modeMatch =
+      filterMode === 'ALL' ||
+      (filterMode === 'V4' && (t.mode === 'GRADUATED' || t.mode === 'INSTANT')) ||
+      (filterMode === 'CURVE' && t.mode === 'CURVE');
+    return stockMatch && modeMatch;
+  });
 
   return (
     <div className="max-w-5xl mx-auto space-y-6">
@@ -77,32 +99,67 @@ export default function ExplorePage() {
           </p>
         </div>
 
-        {/* Filter Pills */}
-        <div className="flex items-center space-x-2 overflow-x-auto pb-1">
+        {/* Mode Filter Pills */}
+        <div className="flex items-center space-x-2">
           <button
-            onClick={() => setFilterStock('ALL')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-              filterStock === 'ALL'
+            onClick={() => setFilterMode('ALL')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+              filterMode === 'ALL'
+                ? 'bg-primary text-white border-primary shadow-sm'
+                : 'bg-surface text-gray-400 border-border hover:text-white'
+            }`}
+          >
+            All Pools
+          </button>
+          <button
+            onClick={() => setFilterMode('V4')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+              filterMode === 'V4'
+                ? 'bg-primary text-white border-primary shadow-sm'
+                : 'bg-surface text-gray-400 border-border hover:text-white'
+            }`}
+          >
+            Uniswap v4 Live
+          </button>
+          <button
+            onClick={() => setFilterMode('CURVE')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all ${
+              filterMode === 'CURVE'
+                ? 'bg-primary text-white border-primary shadow-sm'
+                : 'bg-surface text-gray-400 border-border hover:text-white'
+            }`}
+          >
+            Active Curves
+          </button>
+        </div>
+      </div>
+
+      {/* Stock Filter Pills */}
+      <div className="flex items-center space-x-2 overflow-x-auto pb-1 text-xs">
+        <span className="text-gray-400 font-medium">Filter by Equity:</span>
+        <button
+          onClick={() => setFilterStock('ALL')}
+          className={`px-2.5 py-1 rounded-lg border transition-colors font-medium ${
+            filterStock === 'ALL'
+              ? 'bg-primary text-white border-primary'
+              : 'bg-surface text-gray-400 border-border hover:text-white'
+          }`}
+        >
+          All Stocks
+        </button>
+        {VERIFIED_B20_STOCKS.map((s) => (
+          <button
+            key={s.symbol}
+            onClick={() => setFilterStock(s.symbol)}
+            className={`px-2.5 py-1 rounded-lg border transition-colors font-medium ${
+              filterStock === s.symbol
                 ? 'bg-primary text-white border-primary'
                 : 'bg-surface text-gray-400 border-border hover:text-white'
             }`}
           >
-            All Stocks
+            {s.symbol}
           </button>
-          {VERIFIED_B20_STOCKS.map((s) => (
-            <button
-              key={s.symbol}
-              onClick={() => setFilterStock(s.symbol)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors ${
-                filterStock === s.symbol
-                  ? 'bg-primary text-white border-primary'
-                  : 'bg-surface text-gray-400 border-border hover:text-white'
-              }`}
-            >
-              {s.symbol}
-            </button>
-          ))}
-        </div>
+        ))}
       </div>
 
       {/* Grid of Tokens */}
@@ -120,15 +177,24 @@ export default function ExplorePage() {
                 <div>
                   <div className="flex items-center space-x-1.5">
                     <span className="font-bold text-white text-base">{token.name}</span>
-                    <span className="text-xs text-gray-400">${token.symbol}</span>
+                    <span className="text-xs text-gray-400 font-mono">${token.symbol}</span>
                     {token.isVerified && (
-                      <span className="text-primary" title="Verified Bulldot Factory Launch">
-                        <ShieldCheck className="w-4 h-4" />
+                      <span
+                        className="inline-flex items-center gap-0.5 text-primary bg-primary/10 px-1.5 py-0.5 rounded text-[10px] font-semibold border border-primary/30"
+                        title="Official Bulldot Factory Launch with permanent liquidity lock"
+                      >
+                        <ShieldCheck className="w-3 h-3" />
+                        Verified
                       </span>
                     )}
                   </div>
-                  <div className="text-xs text-gray-400 mt-0.5">
-                    Paired with <span className="text-gray-200 font-medium">{token.pairStock}</span>
+                  <div className="text-xs text-gray-400 mt-0.5 flex items-center gap-1.5">
+                    <span>Paired with <strong className="text-gray-200">{token.pairStock}</strong></span>
+                    {token.isTreasuryAligned && (
+                      <span className="text-[10px] text-green-400 font-medium">
+                        • Stock Treasury Aligned
+                      </span>
+                    )}
                   </div>
                 </div>
               </div>
@@ -143,7 +209,8 @@ export default function ExplorePage() {
                 )}
                 {token.mode === 'GRADUATED' && (
                   <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium bg-green-950/60 text-green-300 border border-green-800/60">
-                    ✓ Uniswap v4 Live
+                    <CheckCircle2 className="w-3 h-3" />
+                    Uniswap v4 Live
                   </span>
                 )}
                 {token.mode === 'INSTANT' && (
@@ -174,17 +241,19 @@ export default function ExplorePage() {
             {/* Metrics Footer */}
             <div className="pt-2 border-t border-border/80 flex items-center justify-between text-xs text-gray-400">
               <div>
-                <span>Pool Reserves: </span>
+                <span>Reserves: </span>
                 <span className="text-gray-200 font-medium">{token.marketCapB20}</span>
               </div>
 
-              <Link
-                href={`/?pair=${token.symbol}`}
-                className="flex items-center space-x-1 text-primary hover:text-primary-hover font-medium"
-              >
-                <span>Trade</span>
-                <ArrowRight className="w-3.5 h-3.5" />
-              </Link>
+              <div className="flex items-center space-x-3">
+                <Link
+                  href={`/?pair=${token.symbol}`}
+                  className="flex items-center space-x-1 text-primary hover:text-primary-hover font-semibold"
+                >
+                  <span>Trade</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </Link>
+              </div>
             </div>
           </div>
         ))}
@@ -192,4 +261,3 @@ export default function ExplorePage() {
     </div>
   );
 }
-

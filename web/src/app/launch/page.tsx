@@ -2,11 +2,14 @@
 
 import React, { useState } from 'react';
 import { VERIFIED_B20_STOCKS } from '../../config/stocks';
-import { ShieldCheck, Rocket, Flame, Layers, AlertTriangle, CheckCircle2 } from 'lucide-react';
-import { useAccount } from 'wagmi';
+import { ShieldCheck, Rocket, Flame, Layers, AlertTriangle, CheckCircle2, Lock, Info, ExternalLink } from 'lucide-react';
+import { useAccount, useChainId } from 'wagmi';
 
 export default function LaunchPage() {
   const { isConnected, address } = useAccount();
+  const chainId = useChainId();
+  const isSepolia = chainId === 84532;
+  const explorerUrl = isSepolia ? 'https://sepolia.basescan.org' : 'https://basescan.org';
 
   const [mode, setMode] = useState<'CURVE' | 'INSTANT'>('CURVE');
   const [selectedStock, setSelectedStock] = useState(VERIFIED_B20_STOCKS[0]);
@@ -16,33 +19,53 @@ export default function LaunchPage() {
   const [feeDestination, setFeeDestination] = useState<'CREATOR' | 'STOCK_TREASURY' | 'CUSTOM'>('CREATOR');
   const [customRecipient, setCustomRecipient] = useState('');
   const [initialDeposit, setInitialDeposit] = useState('5');
-  const [antiDumpEnabled, setAntiDumpEnabled] = useState(true);
+  const [antiDumpMode, setAntiDumpMode] = useState<'2%' | '1%' | 'OFF'>('2%');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [deployedTx, setDeployedTx] = useState<string | null>(null);
 
   const handleLaunch = () => {
     setIsSubmitting(true);
     setTimeout(() => {
       setIsSubmitting(false);
-      alert(
-        `Token ${tokenSymbol || '$BULL'} successfully deployed!\nMode: ${
-          mode === 'CURVE' ? 'Bonding Curve (Auto-migrating)' : 'Instant Uniswap v4 Pool (Locked Forever)'
-        }\nPair: ${selectedStock.symbol}\nCreator Fee: ${creatorFee}%`
-      );
+      setDeployedTx('0x9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b');
     }, 1500);
   };
 
   return (
-    <div className="max-w-2xl mx-auto">
+    <div className="max-w-2xl mx-auto space-y-6">
       {/* Page Header */}
-      <div className="text-center mb-8">
+      <div className="text-center">
         <h1 className="text-3xl font-extrabold text-white tracking-tight">Launch a Token on Base</h1>
         <p className="text-gray-400 mt-2 text-sm">
-          Paired exclusively with verified Coinbase tokenized equities. Completely autonomous and permanent.
+          Paired exclusively with verified Coinbase tokenized equities. Completely autonomous, fair, and permanent.
         </p>
       </div>
 
+      {deployedTx && (
+        <div className="p-4 bg-green-950/40 border border-green-800 rounded-2xl text-xs text-green-300 space-y-2 animate-fadeIn">
+          <div className="flex items-center justify-between">
+            <span className="font-bold text-sm text-green-400 flex items-center gap-1.5">
+              <CheckCircle2 className="w-4 h-4" />
+              Token Successfully Deployed!
+            </span>
+            <a
+              href={`${explorerUrl}/tx/${deployedTx}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center space-x-1 underline hover:text-white"
+            >
+              <span>View on BaseScan</span>
+              <ExternalLink className="w-3.5 h-3.5" />
+            </a>
+          </div>
+          <p className="text-green-300/80">
+            ${tokenSymbol || 'TOKEN'} is deployed via BulldotFactory. Permanent liquidity is locked to 0x...dEaD. Verification badge has been granted.
+          </p>
+        </div>
+      )}
+
       <div className="bg-surface border border-border rounded-2xl p-6 sm:p-8 shadow-2xl space-y-6">
-        {/* Launch Mode Selection */}
+        {/* Step 1: Launch Mode Selection */}
         <div>
           <label className="block text-sm font-semibold text-gray-200 mb-3">
             Step 1: Choose Your Launch Path
@@ -62,7 +85,7 @@ export default function LaunchPage() {
                 <span>Fair Launch Curve</span>
               </div>
               <p className="text-xs text-gray-400 leading-relaxed">
-                Zero capital needed upfront. Community trades along a mathematical curve until 50 shares target is met, then automatically migrates to Uniswap v4.
+                Zero capital needed upfront. Community trades along an AMM curve until 50 canonical equity shares are accumulated, then migrates automatically to Uniswap v4.
               </p>
             </div>
 
@@ -80,13 +103,13 @@ export default function LaunchPage() {
                 <span>Instant Uniswap v4</span>
               </div>
               <p className="text-xs text-gray-400 leading-relaxed">
-                For creators with capital. Seeds a permanent Uniswap v4 pool immediately. Liquidity is permanently burned to 0xDead forever.
+                For creators with capital. Seeds a permanent Uniswap v4 pool immediately. 100% of liquidity is minted to 0x...dEaD forever.
               </p>
             </div>
           </div>
         </div>
 
-        {/* Pairing Asset Selection */}
+        {/* Step 2: Pairing Asset Selection */}
         <div>
           <label className="block text-sm font-semibold text-gray-200 mb-2">
             Step 2: Select Pairing Stock Asset (Coinbase B20 Standard)
@@ -106,7 +129,7 @@ export default function LaunchPage() {
                 >
                   <div className="font-bold text-white text-sm">{stock.symbol}</div>
                   <div className="text-[11px] text-gray-400">{stock.name}</div>
-                  <div className="mt-1 text-[10px] text-primary flex items-center justify-center gap-1">
+                  <div className="mt-1 text-[10px] text-primary flex items-center justify-center gap-1 font-semibold">
                     <ShieldCheck className="w-3 h-3" />
                     Verified B20
                   </div>
@@ -116,7 +139,7 @@ export default function LaunchPage() {
           </div>
         </div>
 
-        {/* Token Metadata */}
+        {/* Step 3: Token Metadata */}
         <div>
           <label className="block text-sm font-semibold text-gray-200 mb-2">
             Step 3: Token Details
@@ -151,7 +174,7 @@ export default function LaunchPage() {
           <div className="p-4 bg-background border border-warning/30 rounded-xl space-y-2">
             <span className="text-sm font-semibold text-warning flex items-center gap-1.5">
               <Flame className="w-4 h-4" />
-              Initial {selectedStock.symbol} Deposit Required
+              Initial {selectedStock.symbol} Liquidity Deposit
             </span>
             <input
               type="number"
@@ -161,16 +184,69 @@ export default function LaunchPage() {
               className="w-full bg-surface border border-border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none"
             />
             <p className="text-xs text-gray-400">
-              This {selectedStock.symbol} will be paired with 1,000,000,000 newly minted {tokenSymbol || 'tokens'} and permanently locked to 0xDead.
+              This {selectedStock.symbol} will be paired with 1,000,000,000 newly minted {tokenSymbol || 'tokens'} in Uniswap v4 and permanently burned to 0x...dEaD.
             </p>
           </div>
         )}
 
-        {/* Creator Fee & Redirection */}
+        {/* Step 4: Optional Anti-Sniper Fair Launch Limit (Bonding Curve Only) */}
+        {mode === 'CURVE' && (
+          <div className="p-4 bg-background/70 border border-border rounded-xl space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <ShieldCheck className="w-4 h-4 text-primary" />
+                <span className="text-xs font-semibold text-white">Anti-Sniper Fair Launch Cap</span>
+              </div>
+              <span className="text-[11px] text-gray-400">Curve Phase Only</span>
+            </div>
+
+            <p className="text-[11px] text-gray-400 leading-relaxed">
+              Restricts any single wallet from cornering the supply during early curve trading. Deactivates automatically upon graduation to Uniswap v4.
+            </p>
+
+            <div className="grid grid-cols-3 gap-2 pt-1 text-xs">
+              <button
+                type="button"
+                onClick={() => setAntiDumpMode('2%')}
+                className={`py-2 rounded-lg border font-semibold transition-all ${
+                  antiDumpMode === '2%'
+                    ? 'border-primary bg-primary/10 text-white'
+                    : 'border-border bg-surface text-gray-400 hover:text-white'
+                }`}
+              >
+                2% Max Wallet (Rec.)
+              </button>
+              <button
+                type="button"
+                onClick={() => setAntiDumpMode('1%')}
+                className={`py-2 rounded-lg border font-semibold transition-all ${
+                  antiDumpMode === '1%'
+                    ? 'border-primary bg-primary/10 text-white'
+                    : 'border-border bg-surface text-gray-400 hover:text-white'
+                }`}
+              >
+                1% Max (Strict)
+              </button>
+              <button
+                type="button"
+                onClick={() => setAntiDumpMode('OFF')}
+                className={`py-2 rounded-lg border font-semibold transition-all ${
+                  antiDumpMode === 'OFF'
+                    ? 'border-primary bg-primary/10 text-white'
+                    : 'border-border bg-surface text-gray-400 hover:text-white'
+                }`}
+              >
+                Disabled (Unlimited)
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Step 5: Creator Fee & Redirection */}
         <div className="space-y-3">
           <div className="flex justify-between items-center">
             <label className="text-sm font-semibold text-gray-200">
-              Step 4: Creator Fee ({creatorFee}%)
+              Step 5: Creator Fee ({creatorFee}%)
             </label>
             <span className="text-xs text-gray-400">Hard limit: 2.5% max</span>
           </div>
@@ -187,7 +263,7 @@ export default function LaunchPage() {
 
           {/* Fee Redirection Options */}
           <div className="mt-2 space-y-2">
-            <span className="text-xs text-gray-400 block">Fee Recipient Destination:</span>
+            <span className="text-xs text-gray-400 block font-medium">Fee Destination Routing:</span>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
               <button
                 type="button"
@@ -238,31 +314,14 @@ export default function LaunchPage() {
           </div>
         </div>
 
-        {/* Anti-Dump Option */}
-        <div className="p-3 bg-background/60 border border-border rounded-xl flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <ShieldCheck className="w-4 h-4 text-primary" />
-            <div>
-              <span className="text-xs font-semibold text-white block">Anti-Sniper Fair Launch Limit</span>
-              <span className="text-[11px] text-gray-400 block">Restricts single wallets to max 2% of curve supply to prevent frontrunning.</span>
-            </div>
-          </div>
-          <input
-            type="checkbox"
-            checked={antiDumpEnabled}
-            onChange={(e) => setAntiDumpEnabled(e.target.checked)}
-            className="w-4 h-4 accent-primary rounded cursor-pointer"
-          />
-        </div>
-
-        {/* Security Confirmation Notice */}
-        <div className="p-3 bg-blue-950/20 border border-blue-900/40 rounded-xl text-xs text-blue-300 space-y-1">
+        {/* Security & Verification Callout */}
+        <div className="p-3.5 bg-blue-950/20 border border-blue-900/40 rounded-xl text-xs text-blue-300 space-y-1">
           <div className="flex items-center gap-1 font-semibold">
             <CheckCircle2 className="w-3.5 h-3.5" />
-            Immutable Deployment Guarantee
+            Official Factory Launch Guarantee
           </div>
-          <p className="text-blue-300/80">
-            Total supply is permanently capped at 1,000,000,000 tokens. No admin keys, no upgrade proxies, and all pool liquidity will be burned irrevocably.
+          <p className="text-blue-300/80 text-[11px] leading-relaxed">
+            Every token launched receives cryptographic verification (`isOfficialLaunch`). Total supply is capped at 1B with no minting or burning functions. 100% of liquidity is burned permanently to 0x...dEaD.
           </p>
         </div>
 
@@ -271,7 +330,7 @@ export default function LaunchPage() {
           {!isConnected ? (
             <button
               disabled
-              className="w-full py-4 bg-surface-hover border border-border text-gray-400 rounded-xl font-medium cursor-not-allowed text-sm"
+              className="w-full py-4 bg-surface-hover border border-border text-gray-400 rounded-xl font-medium cursor-not-allowed text-xs"
             >
               Connect Wallet to Deploy
             </button>
@@ -279,10 +338,10 @@ export default function LaunchPage() {
             <button
               disabled={isSubmitting || !tokenName || !tokenSymbol}
               onClick={handleLaunch}
-              className="w-full py-4 bg-primary hover:bg-primary-hover disabled:bg-surface-hover disabled:text-gray-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-primary/25 text-sm flex items-center justify-center space-x-2"
+              className="w-full py-4 bg-primary hover:bg-primary-hover disabled:bg-surface-hover disabled:text-gray-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-primary/25 text-xs flex items-center justify-center space-x-2"
             >
               {isSubmitting ? (
-                <span>Deploying to Base Sepolia...</span>
+                <span>Deploying to {isSepolia ? 'Base Sepolia' : 'Base Mainnet'}...</span>
               ) : (
                 <span>Launch {tokenSymbol ? `$${tokenSymbol}` : 'Token'} Now</span>
               )}
@@ -293,4 +352,3 @@ export default function LaunchPage() {
     </div>
   );
 }
-

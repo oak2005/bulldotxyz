@@ -13,6 +13,9 @@ import {PoolKey, PoolId, PoolIdLibrary, IPoolManager, IPositionManager} from "./
  * - AMM SOLVENCY GUARANTEE:
  *   Virtual reserves are denominated in native traded asset units (raw B20 tokens and Meme tokens)
  *   satisfying (vB20 * vTokens = k). User sell payouts are mathematically bounded by actual contract B20 balance.
+ * - ANTI-SNIPER FAIR LAUNCH CAP:
+ *   Includes optional `maxWalletTokens` restriction during the bonding curve phase to prevent single wallets
+ *   from cornering supply. Automatically deactivates upon Uniswap v4 graduation.
  * - SHARE NORMALIZATION (1 Token != 1 Share):
  *   Graduation threshold (e.g. 50 shares) is denominated in canonical underlying shares via `tokensToShares()`.
  *   When stock splits adjust the multiplier, the target graduation adapts dynamically without distorting AMM pricing.
@@ -52,6 +55,7 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
     uint256 public immutable override creatorFeeBps;
     uint256 public immutable protocolFeeBps;
     uint256 public immutable override targetShares;
+    uint256 public immutable override maxWalletTokens;
 
     // --- Uniswap v4 Constants ---
     uint160 internal constant MIN_SQRT_RATIO = 4295128739;
@@ -101,6 +105,7 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
         uint256 _creatorFeeBps,
         uint256 _protocolFeeBps,
         uint256 _targetShares,
+        uint256 _maxWalletBps,
         address _poolManager,
         address _positionManager
     ) {
@@ -116,6 +121,7 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
         creatorFeeBps = _creatorFeeBps;
         protocolFeeBps = _protocolFeeBps;
         targetShares = _targetShares;
+        maxWalletTokens = _maxWalletBps > 0 ? (TOTAL_CURVE_TOKENS * _maxWalletBps) / 10_000 : 0;
 
         poolManager = _poolManager;
         positionManager = _positionManager;
@@ -308,6 +314,14 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
         tokensOut = virtualTokenReserve - newVirtualTokens;
 
         if (tokensOut < minTokensOut) revert SlippageExceeded();
+
+        // 5. Enforce anti-dump max wallet cap if enabled
+        if (maxWalletTokens > 0) {
+            if (BulldotToken(token).balanceOf(recipient) + tokensOut > maxWalletTokens) {
+                revert MaxWalletExceeded();
+            }
+        }
+
         if (BulldotToken(token).balanceOf(address(this)) < tokensOut + MIGRATION_TOKENS) {
             revert InsufficientReserve();
         }
@@ -316,13 +330,13 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
         virtualTokenReserve = newVirtualTokens;
         totalB20Deposited += netB20;
 
-        // 5. Deliver tokens to buyer
+        // 6. Deliver tokens to buyer
         bool tokenSuccess = BulldotToken(token).transfer(recipient, tokensOut);
         if (!tokenSuccess) revert TransferFailed();
 
         emit TokensPurchased(msg.sender, recipient, effectiveB20In, tokensOut, creatorFee + protocolFee);
 
-        // 6. Auto-migrate if target canonical shares reached
+        // 7. Auto-migrate if target canonical shares reached
         if (totalSharesAccumulated() >= targetShares) {
             _executeGraduation();
         }

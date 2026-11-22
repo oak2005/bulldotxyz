@@ -122,7 +122,8 @@ contract BaseSepoliaForkTest is Test {
             symbol: "FCT",
             b20Stock: address(bCOIN),
             feeRecipient: feeRecipient,
-            creatorFeeBps: creatorFeeBps
+            creatorFeeBps: creatorFeeBps,
+            maxWalletBps: 0
         });
 
         vm.prank(creator);

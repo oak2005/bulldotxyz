@@ -8,6 +8,7 @@ import {PoolKey, PoolId} from "./IUniswapV4Minimal.sol";
  * - Interface for BulldotFactory: the deployment gateway for bulldotxyz on Base.
  * - Supports official Coinbase B20 Registry pattern and autonomous fee vaults.
  * - Enforces pairing restrictions exclusively to verified B20 stock assets.
+ * - Includes on-chain token authenticity verification and optional anti-sniper fair-launch controls.
  */
 interface IBulldotFactory {
     struct InstantPoolParams {
@@ -25,6 +26,7 @@ interface IBulldotFactory {
         address b20Stock;
         address feeRecipient;
         uint16 creatorFeeBps; // Max 250 bps (2.5%)
+        uint16 maxWalletBps;  // Anti-dump option (e.g. 200 = 2% max holding, 0 = disabled)
     }
 
     event InstantPoolLaunched(
@@ -46,7 +48,8 @@ interface IBulldotFactory {
         address creator,
         address feeRecipient,
         uint16 creatorFeeBps,
-        uint256 targetShares
+        uint256 targetShares,
+        uint16 maxWalletBps
     );
 
     event CreatorFeeCollected(
@@ -68,6 +71,7 @@ interface IBulldotFactory {
     function protocolFeeRecipient() external view returns (address);
     function isVerifiedB20Stock(address stock) external view returns (bool);
     function isDeployedCurve(address curve) external view returns (bool);
+    function isOfficialLaunch(address token) external view returns (bool);
     function owner() external view returns (address);
 
     function createInstantPool(InstantPoolParams calldata params) external returns (address token, PoolId poolId);

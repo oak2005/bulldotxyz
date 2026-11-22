@@ -13,16 +13,14 @@ import {PoolKey, PoolId, PoolIdLibrary, IPoolManager, IPositionManager} from "./
  * @notice SECURITY NOTES:
  * - BulldotFactory is the core deployment gateway for bulldotxyz on Base.
  * - OFFICIAL B20 REGISTRY PATTERN:
- *   Supports both the official Coinbase B20 Registry contract and local allowlisting.
+ *   Supports both official Coinbase B20 Registry contract and local allowlisting.
  *   Verified stock status is checked dynamically via `IB20Registry.isVerifiedStock(stock)`.
- * - FULL FEE SYSTEM & REDIRECTION:
- *   Integrates with BulldotFeeVault to route creator fees on both Instant and Curve launch modes.
- *   Enables transparent tracking of raw B20 token fees alongside normalized share values.
- * - PERMANENT LIQUIDITY LOCK: All liquidity created by instant mode or bonding curve graduation is irreversibly
- *   minted/locked to `address(0x000000000000000000000000000000000000dEaD)`. No withdrawal hooks exist anywhere.
- * - MINIMAL LOCKED-DOWN ADMIN: Owner powers are strictly limited to updating the B20 registry/allowlist
- *   and protocol fee recipient. Owner CANNOT touch user funds, pause trading, or alter token supply.
- *   Ownership can be renounced via `renounceOwnership()`.
+ * - TOKEN VERIFICATION BADGE SUPPORT:
+ *   Cryptographically tracks all launched tokens via `isOfficialLaunch(token)` for transparent verification.
+ * - OPTIONAL ANTI-SNIPER FAIR LAUNCH:
+ *   Supports optional max wallet limits during bonding curve phase (`maxWalletBps`).
+ * - PERMANENT LIQUIDITY LOCK: All liquidity is irreversibly minted/locked to `address(0x...dEaD)`.
+ * - MINIMAL LOCKED-DOWN ADMIN: Renounceable ownership; zero custody or pauses over user funds.
  */
 contract BulldotFactory is IBulldotFactory {
     using PoolIdLibrary for PoolKey;
@@ -57,8 +55,9 @@ contract BulldotFactory is IBulldotFactory {
     // --- B20 Stock Allowlist ---
     mapping(address => bool) public isVerifiedB20StockMapping;
 
-    // --- Deployed Registries ---
+    // --- Deployed Registries & Official Verification ---
     mapping(address => bool) public override isDeployedCurve;
+    mapping(address => bool) public override isOfficialLaunch;
     address[] public allLaunchedTokens;
 
     // --- Reentrancy Guard ---
@@ -143,6 +142,7 @@ contract BulldotFactory is IBulldotFactory {
         BulldotToken token = new BulldotToken(params.name, params.symbol, address(this));
         tokenAddr = address(token);
         allLaunchedTokens.push(tokenAddr);
+        isOfficialLaunch[tokenAddr] = true;
 
         // 4. Handle Creator Fee & FeeVault registration
         uint256 creatorFee = (params.b20Amount * params.creatorFeeBps) / 10_000;
@@ -254,6 +254,7 @@ contract BulldotFactory is IBulldotFactory {
         BulldotToken token = new BulldotToken(params.name, params.symbol, address(this));
         tokenAddr = address(token);
         allLaunchedTokens.push(tokenAddr);
+        isOfficialLaunch[tokenAddr] = true;
 
         // 3. Register token with FeeVault
         if (feeVault != address(0)) {
@@ -263,7 +264,7 @@ contract BulldotFactory is IBulldotFactory {
         // 4. Canonical target: 50 canonical shares
         uint256 targetShares = 50 * 1e18;
 
-        // 5. Deploy BulldotBondingCurve with FeeVault integration
+        // 5. Deploy BulldotBondingCurve with FeeVault integration & anti-sniper option
         BulldotBondingCurve curve = new BulldotBondingCurve(
             tokenAddr,
             params.b20Stock,
@@ -274,6 +275,7 @@ contract BulldotFactory is IBulldotFactory {
             params.creatorFeeBps,
             0, // Default protocol fee
             targetShares,
+            params.maxWalletBps,
             poolManager,
             positionManager
         );
@@ -292,7 +294,8 @@ contract BulldotFactory is IBulldotFactory {
             msg.sender,
             params.feeRecipient,
             params.creatorFeeBps,
-            targetShares
+            targetShares,
+            params.maxWalletBps
         );
     }
 

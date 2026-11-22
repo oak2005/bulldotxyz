@@ -116,7 +116,8 @@ contract BulldotFeeSystemTest is Test {
             symbol: "TFT",
             b20Stock: address(bCOIN),
             feeRecipient: initialFeeRecipient,
-            creatorFeeBps: creatorFeeBps
+            creatorFeeBps: creatorFeeBps,
+            maxWalletBps: 0
         });
 
         vm.prank(creator);

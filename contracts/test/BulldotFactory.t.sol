@@ -136,7 +136,8 @@ contract BulldotFactoryTest is Test {
             symbol: "CTA",
             b20Stock: address(bCOIN),
             feeRecipient: feeRecipient,
-            creatorFeeBps: creatorFeeBps
+            creatorFeeBps: creatorFeeBps,
+            maxWalletBps: 0
         });
 
         vm.prank(creator);
@@ -201,5 +202,22 @@ contract BulldotFactoryTest is Test {
         vm.prank(owner);
         vm.expectRevert(BulldotFactory.Unauthorized.selector);
         factory.setB20StockVerification(address(unverifiedStock), false);
+    }
+
+    function test_OfficialTokenBadgeVerification() public {
+        IBulldotFactory.InstantPoolParams memory params = IBulldotFactory.InstantPoolParams({
+            name: "Verified Token",
+            symbol: "VER",
+            b20Stock: address(bCOIN),
+            b20Amount: INITIAL_B20_DEPOSIT,
+            feeRecipient: feeRecipient,
+            creatorFeeBps: 100
+        });
+
+        vm.prank(creator);
+        (address tokenAddr, ) = factory.createInstantPool(params);
+
+        assertTrue(factory.isOfficialLaunch(tokenAddr), "Launched token must have official verification badge");
+        assertFalse(factory.isOfficialLaunch(address(0xDEADBEEF)), "Random token must not have verification badge");
     }
 }

@@ -57,7 +57,8 @@ contract BulldotRouterTest is Test {
             symbol: "RTT",
             b20Stock: address(bCOIN),
             feeRecipient: creator,
-            creatorFeeBps: 100
+            creatorFeeBps: 100,
+            maxWalletBps: 0
         });
 
         vm.prank(creator);
@@ -84,7 +85,8 @@ contract BulldotRouterTest is Test {
             symbol: "RTT",
             b20Stock: address(bCOIN),
             feeRecipient: creator,
-            creatorFeeBps: 100
+            creatorFeeBps: 100,
+            maxWalletBps: 0
         });
 
         vm.prank(creator);
@@ -108,7 +110,8 @@ contract BulldotRouterTest is Test {
             symbol: "RTT",
             b20Stock: address(bCOIN),
             feeRecipient: creator,
-            creatorFeeBps: 100
+            creatorFeeBps: 100,
+            maxWalletBps: 0
         });
 
         vm.prank(creator);
