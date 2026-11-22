@@ -1,0 +1,26 @@
+{
+  "chainId": 8453,
+  "networkName": "base-mainnet",
+  "uniswapV4": {
+    "poolManager": "0x498581fF718922c3f8e6Ac1447f5c0994264F0F9",
+    "positionManager": "0x7C40c31F41609b77Ecdc5222E42b8e3a2B79A63f",
+    "permit2": "0x000000000022D473030F116dDEE9F6B43aC78BA3"
+  },
+  "verifiedB20Stocks": [
+    {
+      "symbol": "bCOIN",
+      "name": "Coinbase Tokenized Stock",
+      "address": "0x0000000000000000000000000000000000000001",
+      "decimals": 18
+    },
+    {
+      "symbol": "bNVDA",
+      "name": "Nvidia Tokenized Stock",
+      "address": "0x0000000000000000000000000000000000000002",
+      "decimals": 18
+    }
+  ],
+  "graduationThresholdShares": "50000000000000000000",
+  "protocolFeeBps": 50,
+  "maxCreatorFeeBps": 200
+}

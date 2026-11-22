@@ -1,0 +1,26 @@
+{
+  "chainId": 84532,
+  "networkName": "base-sepolia",
+  "uniswapV4": {
+    "poolManager": "0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408",
+    "positionManager": "0x4b2c77d209d3405f41a037ec6c77f7f5b8e2ca80",
+    "permit2": "0x000000000022D473030F116dDEE9F6B43aC78BA3"
+  },
+  "verifiedB20Stocks": [
+    {
+      "symbol": "bCOIN",
+      "name": "Coinbase Tokenized Stock",
+      "address": "0x0000000000000000000000000000000000000001",
+      "decimals": 18
+    },
+    {
+      "symbol": "bNVDA",
+      "name": "Nvidia Tokenized Stock",
+      "address": "0x0000000000000000000000000000000000000002",
+      "decimals": 18
+    }
+  ],
+  "graduationThresholdShares": "50000000000000000000",
+  "protocolFeeBps": 50,
+  "maxCreatorFeeBps": 200
+}
