@@ -1,0 +1,12 @@
+{
+  "name": "bulldotxyz-root",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "cd web && npm run build",
+    "dev": "cd web && npm run dev",
+    "start": "cd web && npm run start",
+    "lint": "cd web && npm run lint"
+  }
+}
+

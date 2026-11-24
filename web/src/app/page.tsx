@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, Suspense } from 'react';
+import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { VERIFIED_B20_STOCKS, B20StockMetadata } from '../config/stocks';
 import { PriceChart } from '../components/PriceChart';
@@ -19,6 +20,9 @@ import {
   Rocket,
   Pause,
   Wallet,
+  Layers,
+  Building2,
+  ArrowRight,
 } from 'lucide-react';
 import { useAccount, useChainId, useSwitchChain } from 'wagmi';
 import { baseSepolia } from 'wagmi/chains';
@@ -586,6 +590,114 @@ function SwapContent() {
               tokenReserve={activeToken.tokenReserve}
             />
           )}
+        </div>
+      </div>
+
+      {/* Protocol Features & Ecosystem Hub */}
+      <div className="pt-8 border-t border-border/80 space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
+              <span>🐂</span>
+              <span>All bulldot.xyz Features</span>
+            </h2>
+            <p className="text-xs text-gray-400 mt-0.5">
+              Everything you need: token launchpad, liquidity pool explorer, and creator equity fee management.
+            </p>
+          </div>
+          <Link
+            href="/launch"
+            className="self-start sm:self-auto px-3.5 py-1.5 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-bold transition-all shadow-md flex items-center space-x-1.5"
+          >
+            <Rocket className="w-3.5 h-3.5" />
+            <span>Launch a New Token</span>
+          </Link>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Card 1: Token Launchpad */}
+          <Link
+            href="/launch"
+            className="p-5 bg-surface border border-border hover:border-primary/60 rounded-2xl transition-all group shadow-md hover:shadow-primary/5 space-y-3 block"
+          >
+            <div className="flex items-center justify-between">
+              <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary group-hover:scale-105 transition-transform">
+                <Rocket className="w-5 h-5" />
+              </div>
+              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-blue-950/60 text-blue-300 border border-blue-800">
+                Launchpad
+              </span>
+            </div>
+            <div>
+              <h3 className="font-bold text-white text-base group-hover:text-primary transition-colors flex items-center gap-1.5">
+                <span>Token Launchpad</span>
+                <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+              </h3>
+              <p className="text-xs text-gray-400 mt-1 leading-relaxed">
+                Launch community tokens with Fair Launch Bonding Curves (0 capital needed) or Instant Uniswap v4 pools with 100% liquidity locked forever to 0x...dEaD.
+              </p>
+            </div>
+            <div className="text-xs font-semibold text-primary pt-1 flex items-center gap-1">
+              <span>Deploy Token Now</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </div>
+          </Link>
+
+          {/* Card 2: Explore Pools */}
+          <Link
+            href="/explore"
+            className="p-5 bg-surface border border-border hover:border-primary/60 rounded-2xl transition-all group shadow-md hover:shadow-primary/5 space-y-3 block"
+          >
+            <div className="flex items-center justify-between">
+              <div className="w-10 h-10 rounded-xl bg-emerald-950/60 border border-emerald-800/40 flex items-center justify-center text-emerald-400 group-hover:scale-105 transition-transform">
+                <Layers className="w-5 h-5" />
+              </div>
+              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800">
+                Explore Pools
+              </span>
+            </div>
+            <div>
+              <h3 className="font-bold text-white text-base group-hover:text-emerald-400 transition-colors flex items-center gap-1.5">
+                <span>Explore Pools & Curves</span>
+                <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+              </h3>
+              <p className="text-xs text-gray-400 mt-1 leading-relaxed">
+                Browse verified community tokens paired with bCOIN, bNVDA, bAAPL, and bTSLA. Track bonding curve graduation progress in real time.
+              </p>
+            </div>
+            <div className="text-xs font-semibold text-emerald-400 pt-1 flex items-center gap-1">
+              <span>View All Pools</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </div>
+          </Link>
+
+          {/* Card 3: Creator Hub & Treasury */}
+          <Link
+            href="/dashboard"
+            className="p-5 bg-surface border border-border hover:border-primary/60 rounded-2xl transition-all group shadow-md hover:shadow-primary/5 space-y-3 block"
+          >
+            <div className="flex items-center justify-between">
+              <div className="w-10 h-10 rounded-xl bg-amber-950/60 border border-amber-800/40 flex items-center justify-center text-amber-400 group-hover:scale-105 transition-transform">
+                <Building2 className="w-5 h-5" />
+              </div>
+              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-amber-950/60 text-amber-300 border border-amber-800">
+                Creator Hub
+              </span>
+            </div>
+            <div>
+              <h3 className="font-bold text-white text-base group-hover:text-amber-400 transition-colors flex items-center gap-1.5">
+                <span>Creator & Treasury Hub</span>
+                <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
+              </h3>
+              <p className="text-xs text-gray-400 mt-1 leading-relaxed">
+                Track raw and canonical share earnings, claim fee rewards, or redirect fees to Coinbase stock treasuries for automated buybacks and burns.
+              </p>
+            </div>
+            <div className="text-xs font-semibold text-amber-400 pt-1 flex items-center gap-1">
+              <span>Manage Fees & Claims</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </div>
+          </Link>
         </div>
       </div>
     </div>

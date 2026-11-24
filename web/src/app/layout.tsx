@@ -3,10 +3,12 @@ import React from 'react';
 import type { Metadata } from 'next';
 import { Providers } from '../providers';
 import { Header } from '../components/Header';
+import { MobileBottomNav } from '../components/MobileBottomNav';
 
 export const metadata: Metadata = {
   title: 'bulldotxyz — Simple, Reliable DEX & Launchpad on Base',
-  description: 'Trade and launch community tokens exclusively paired with Coinbase tokenized stocks (B20 standard). Fully autonomous, permanent Uniswap v4 liquidity.',
+  description:
+    'Trade and launch community tokens exclusively paired with Coinbase tokenized stocks (B20 standard). Fully autonomous, permanent Uniswap v4 liquidity.',
 };
 
 export default function RootLayout({
@@ -19,10 +21,11 @@ export default function RootLayout({
       <body className="bg-background text-gray-100 flex flex-col min-h-screen">
         <Providers>
           <Header />
-          <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 pb-24 md:pb-8">
             {children}
           </main>
-          <footer className="border-t border-border py-6 text-center text-xs text-gray-500">
+          <MobileBottomNav />
+          <footer className="border-t border-border py-6 text-center text-xs text-gray-500 mb-16 md:mb-0">
             <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row justify-between items-center gap-2">
               <p>bulldot.xyz — Autonomous DEX & Launchpad on Base</p>
               <p className="flex items-center space-x-2">
@@ -37,4 +40,3 @@ export default function RootLayout({
     </html>
   );
 }
-
