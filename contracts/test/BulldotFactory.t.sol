@@ -252,4 +252,33 @@ contract BulldotFactoryTest is Test {
         assertEq(factory.tokenToCurve(tokenAddr), curveAddr, "Factory must accurately map token to curve");
         assertEq(factory.allTokensCount(), 1, "Factory must accurately track launched tokens count");
     }
+
+    function test_TestnetTreasuryFeeConfig() public {
+        assertEq(factory.TESTNET_TREASURY_RECIPIENT(), 0xc96147c68ca8e153e70B3bC4745b8d974bDd212A);
+        assertEq(factory.MAX_PROTOCOL_FEE_BPS(), 10);
+
+        // Cannot exceed 0.1% (10 bps)
+        vm.prank(owner);
+        vm.expectRevert(IBulldotFactory.ProtocolFeeExceedsLimit.selector);
+        factory.setProtocolFeeBps(11);
+
+        // Can set up to 10 bps
+        vm.prank(owner);
+        factory.setProtocolFeeBps(10);
+        assertEq(factory.protocolFeeBps(), 10);
+
+        // Testnet auto-assignment verification
+        address[] memory verifiedList = new address[](1);
+        verifiedList[0] = address(bCOIN);
+        BulldotFactory testnetFactory = new BulldotFactory(
+            address(poolManager),
+            address(0),
+            0xc96147c68ca8e153e70B3bC4745b8d974bDd212A,
+            address(feeVault),
+            address(0),
+            verifiedList
+        );
+        assertEq(testnetFactory.protocolFeeRecipient(), 0xc96147c68ca8e153e70B3bC4745b8d974bDd212A);
+        assertEq(testnetFactory.protocolFeeBps(), 10);
+    }
 }

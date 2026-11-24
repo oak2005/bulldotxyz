@@ -124,7 +124,8 @@ function SwapContent() {
   // Fees
   const creatorFeePercent = activeToken.creatorFeeBps / 100;
   const poolFeePercent = 0.3; // 0.30% Uniswap v4 standard
-  const estimatedFeeB20 = ((tradeSizeInB20 * (creatorFeePercent + poolFeePercent)) / 100).toFixed(4);
+  const treasuryFeePercent = isSepolia ? 0.10 : 0.0; // Hard-capped at 0.10% (10 bps) for testnet only
+  const estimatedFeeB20 = ((tradeSizeInB20 * (creatorFeePercent + poolFeePercent + treasuryFeePercent)) / 100).toFixed(4);
 
   // Token USD equivalent
   const tokenPriceUsd = (activeToken.stockPriceUsd / activeToken.ratePerStock).toFixed(6);
@@ -462,9 +463,29 @@ function SwapContent() {
                 <div className="flex justify-between text-gray-400">
                   <span>Trading Fees</span>
                   <span className="text-gray-200 text-[11px]">
-                    {creatorFeePercent}% Creator + {poolFeePercent}% v4 LP (~{estimatedFeeB20} {activeStock.symbol})
+                    {creatorFeePercent}% Creator + {poolFeePercent}% v4 LP
+                    {isSepolia && ' + 0.10% Treasury'} (~{estimatedFeeB20} {activeStock.symbol})
                   </span>
                 </div>
+
+                {isSepolia && (
+                  <div className="flex justify-between items-center text-gray-400 pt-1 border-t border-border/40">
+                    <span className="text-[11px] flex items-center gap-1 text-gray-400">
+                      <ShieldCheck className="w-3.5 h-3.5 text-primary" />
+                      Testnet Treasury Fee (0.10% Cap)
+                    </span>
+                    <a
+                      href="https://sepolia.basescan.org/address/0xc96147c68ca8e153e70B3bC4745b8d974bDd212A"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[11px] font-mono text-primary hover:underline flex items-center gap-1"
+                      title="Testnet Treasury Address: 0xc96147c68ca8e153e70B3bC4745b8d974bDd212A"
+                    >
+                      <span>0xc961...212A</span>
+                      <ExternalLink className="w-3 h-3" />
+                    </a>
+                  </div>
+                )}
               </div>
 
               {/* Transaction Confirmed Card */}

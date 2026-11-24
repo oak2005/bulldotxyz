@@ -44,12 +44,15 @@ contract BulldotFactory is IBulldotFactory {
     uint24 public constant DEFAULT_POOL_FEE = 3000;    // 0.30% Uniswap v4 standard tier
     int24 public constant DEFAULT_TICK_SPACING = 60;
     address public constant PERMANENT_DEAD = address(0x000000000000000000000000000000000000dEaD);
+    address public constant TESTNET_TREASURY_RECIPIENT = 0xc96147c68ca8e153e70B3bC4745b8d974bDd212A;
+    uint16 public constant MAX_PROTOCOL_FEE_BPS = 10; // Max 0.10% (treasury fee can NEVER exceed 0.1%)
 
     // --- Protocol Configuration ---
     address public override owner;
     address public immutable override poolManager;
     address public immutable override positionManager;
     address public override protocolFeeRecipient;
+    uint16 public override protocolFeeBps;
     address public override feeVault;
     address public override b20Registry;
 
@@ -93,7 +96,15 @@ contract BulldotFactory is IBulldotFactory {
         owner = msg.sender;
         poolManager = _poolManager;
         positionManager = _positionManager;
-        protocolFeeRecipient = _protocolFeeRecipient == address(0) ? msg.sender : _protocolFeeRecipient;
+
+        // Testnet Treasury Fee Configuration: 0.1% hard-capped fee goes to 0xc96147c68ca8e153e70B3bC4745b8d974bDd212A for testnet only
+        if (block.chainid == 84532 || _protocolFeeRecipient == TESTNET_TREASURY_RECIPIENT) {
+            protocolFeeRecipient = TESTNET_TREASURY_RECIPIENT;
+            protocolFeeBps = MAX_PROTOCOL_FEE_BPS; // 10 bps (0.10%)
+        } else {
+            protocolFeeRecipient = _protocolFeeRecipient;
+            protocolFeeBps = 0;
+        }
 
         // Deploy default fee vault if none provided
         feeVault = _feeVault == address(0) ? address(new BulldotFeeVault()) : _feeVault;
@@ -290,7 +301,7 @@ contract BulldotFactory is IBulldotFactory {
             protocolFeeRecipient,
             feeVault,
             params.creatorFeeBps,
-            0, // Default protocol fee
+            protocolFeeBps,
             targetShares,
             params.maxWalletBps,
             poolManager,
@@ -357,6 +368,12 @@ contract BulldotFactory is IBulldotFactory {
         if (newRecipient == address(0)) revert ZeroAddress();
         emit ProtocolFeeRecipientUpdated(protocolFeeRecipient, newRecipient);
         protocolFeeRecipient = newRecipient;
+    }
+
+    function setProtocolFeeBps(uint16 newFeeBps) external override onlyOwner {
+        if (newFeeBps > MAX_PROTOCOL_FEE_BPS) revert ProtocolFeeExceedsLimit();
+        emit ProtocolFeeBpsUpdated(protocolFeeBps, newFeeBps);
+        protocolFeeBps = newFeeBps;
     }
 
     function transferOwnership(address newOwner) external onlyOwner {

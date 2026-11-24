@@ -43,6 +43,9 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
     error TransferFailed();
     error Reentrancy();
     error CreatorFeeExceedsLimit();
+    error ProtocolFeeExceedsLimit();
+
+    uint256 public constant MAX_PROTOCOL_FEE_BPS = 10; // Max 0.10% (treasury fee can never exceed 0.1%)
 
     // --- Immutables & Config ---
     address public immutable override token;
@@ -110,6 +113,7 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
         address _positionManager
     ) {
         if (_creatorFeeBps > 250) revert CreatorFeeExceedsLimit();
+        if (_protocolFeeBps > MAX_PROTOCOL_FEE_BPS) revert ProtocolFeeExceedsLimit();
         if (_b20Stock == address(0) || _creator == address(0)) revert ZeroAddress();
 
         token = _token;

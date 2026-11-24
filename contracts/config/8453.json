@@ -8,6 +8,9 @@
   },
   "b20Registry": "0x0000000000000000000000000000000000000000",
   "feeVault": "0x0000000000000000000000000000000000000000",
+  "protocolFeeRecipient": "0x0000000000000000000000000000000000000000",
+  "protocolFeeBps": 0,
+  "maxProtocolFeeBps": 10,
   "verifiedB20Stocks": [
     {
       "symbol": "bCOIN",
@@ -23,6 +26,5 @@
     }
   ],
   "graduationThresholdShares": "50000000000000000000",
-  "protocolFeeBps": 50,
   "maxCreatorFeeBps": 250
 }

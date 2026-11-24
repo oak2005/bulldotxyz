@@ -5,6 +5,9 @@ import { useAccount, useChainId, useSendTransaction, useSwitchChain } from 'wagm
 import { base, baseSepolia } from 'wagmi/chains';
 import { VERIFIED_B20_STOCKS, B20StockMetadata } from '../config/stocks';
 
+export const TESTNET_TREASURY_ADDRESS = '0xc96147c68ca8e153e70B3bC4745b8d974bDd212A';
+export const MAX_TREASURY_FEE_BPS = 10; // 0.10% (can never exceed 0.1%)
+
 export interface TokenPair {
   name: string;
   symbol: string;
@@ -115,6 +118,8 @@ interface ProtocolContextType {
   isMainnet: boolean;
   isSepolia: boolean;
   isMainnetPaused: boolean;
+  treasuryFeeBps: number;
+  treasuryFeeRecipient: string;
   stockBalances: Record<string, number>;
   tokenBalances: Record<string, number>;
   communityTokens: TokenPair[];
@@ -540,6 +545,8 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
         isMainnet,
         isSepolia,
         isMainnetPaused,
+        treasuryFeeBps: isSepolia ? 10 : 0,
+        treasuryFeeRecipient: isSepolia ? TESTNET_TREASURY_ADDRESS : '0x0000000000000000000000000000000000000000',
         stockBalances,
         tokenBalances,
         communityTokens,

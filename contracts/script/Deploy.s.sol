@@ -60,10 +60,14 @@ contract DeployScript is Script {
             vault = BulldotFeeVault(feeVault);
         }
 
+        address protocolFeeRecipient = chainId == 84532
+            ? 0xc96147c68ca8e153e70B3bC4745b8d974bDd212A
+            : deployer;
+
         BulldotFactory factory = new BulldotFactory(
             poolManager,
             positionManager,
-            deployer, // protocol fee recipient
+            protocolFeeRecipient,
             feeVault,
             b20Registry,
             initialStocks

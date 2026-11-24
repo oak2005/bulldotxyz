@@ -9,8 +9,11 @@ import {PoolKey, PoolId} from "./IUniswapV4Minimal.sol";
  * - Supports official Coinbase B20 Registry pattern and autonomous fee vaults.
  * - Enforces pairing restrictions exclusively to verified B20 stock assets.
  * - Includes on-chain token authenticity verification and optional anti-sniper fair-launch controls.
+ * - Enforces a maximum protocol/treasury fee hard cap of 0.10% (10 bps).
  */
 interface IBulldotFactory {
+    error ProtocolFeeExceedsLimit();
+
     struct InstantPoolParams {
         string name;
         string symbol;
@@ -59,9 +62,17 @@ interface IBulldotFactory {
         uint256 feeAmount
     );
 
+    event ProtocolFeeCollected(
+        address indexed token,
+        address indexed stock,
+        address indexed recipient,
+        uint256 feeAmount
+    );
+
     event B20RegistryUpdated(address indexed oldRegistry, address indexed newRegistry);
     event B20StockVerificationUpdated(address indexed stock, bool isVerified);
     event ProtocolFeeRecipientUpdated(address indexed oldRecipient, address indexed newRecipient);
+    event ProtocolFeeBpsUpdated(uint256 oldFeeBps, uint256 newFeeBps);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
 
     function poolManager() external view returns (address);
@@ -69,6 +80,7 @@ interface IBulldotFactory {
     function feeVault() external view returns (address);
     function b20Registry() external view returns (address);
     function protocolFeeRecipient() external view returns (address);
+    function protocolFeeBps() external view returns (uint16);
     function isVerifiedB20Stock(address stock) external view returns (bool);
     function isDeployedCurve(address curve) external view returns (bool);
     function isOfficialLaunch(address token) external view returns (bool);
@@ -81,5 +93,6 @@ interface IBulldotFactory {
     function setB20Registry(address registry) external;
     function setB20StockVerification(address stock, bool isVerified) external;
     function setProtocolFeeRecipient(address newRecipient) external;
+    function setProtocolFeeBps(uint16 newFeeBps) external;
     function renounceOwnership() external;
 }

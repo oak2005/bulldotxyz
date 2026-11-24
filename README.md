@@ -101,6 +101,8 @@ All addresses and parameters are managed strictly via environment configuration:
 | **Uniswap v4 PoolManager** | `0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408` | `0x498581fF718922c3f8e6Ac1447f5c0994264F0F9` |
 | **Uniswap v4 PositionManager** | `0x4b2c77d209d3405f41a037ec6c77f7f5b8e2ca80` | `0x7C40c31F41609b77Ecdc5222E42b8e3a2B79A63f` |
 | **Permit2** | `0x000000000022D473030F116dDEE9F6B43aC78BA3` | `0x000000000022D473030F116dDEE9F6B43aC78BA3` |
+| **Treasury Fee Recipient** | `0xc96147c68ca8e153e70B3bC4745b8d974bDd212A` | `address(0)` (Inactive) |
+| **Treasury Fee Rate** | `0.10%` (10 bps, immutable $\le 0.1\%$ cap) | `0.00%` |
 | **Config File** | `contracts/config/84532.json` | `contracts/config/8453.json` |
 
 ---
@@ -125,13 +127,13 @@ forge test -vvv
 ### Test Suite Summary
 ```text
 Ran 5 test suites:
-- test/BulldotFactory.t.sol: 10 passed, 0 failed
-- test/BulldotBondingCurve.t.sol: 7 passed, 0 failed
+- test/BulldotFactory.t.sol: 11 passed, 0 failed
+- test/BulldotBondingCurve.t.sol: 8 passed, 0 failed
 - test/BulldotRouter.t.sol: 6 passed, 0 failed
 - test/BulldotFeeSystem.t.sol: 6 passed, 0 failed
 - test/BaseSepoliaFork.t.sol: 3 passed, 0 failed
 
-Total: 32 tests passed; 0 failed; 0 skipped
+Total: 34 tests passed; 0 failed; 0 skipped
 ```
 
 ### Deploy to Base Sepolia

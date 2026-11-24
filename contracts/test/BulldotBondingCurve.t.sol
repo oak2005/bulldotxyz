@@ -21,7 +21,7 @@ contract BulldotBondingCurveTest is Test {
     address public bob = address(0xBBBB);
 
     uint256 public constant CREATOR_FEE_BPS = 100; // 1%
-    uint256 public constant PROTOCOL_FEE_BPS = 50;  // 0.5%
+    uint256 public constant PROTOCOL_FEE_BPS = 10;  // 0.1% (maximum allowable treasury fee)
     uint256 public constant TARGET_SHARES = 50 * 1e18; // 50 shares target
 
     function setUp() public {
@@ -184,5 +184,24 @@ contract BulldotBondingCurveTest is Test {
         vm.prank(bob);
         vm.expectRevert(IBulldotBondingCurve.MaxWalletExceeded.selector);
         curve2.buy(10 * 1e18, 0, bob);
+    }
+
+    function test_RevertWhenProtocolFeeExceeds0_1Percent() public {
+        BulldotToken tokenBad = new BulldotToken("TEST", "TST", address(this));
+        vm.expectRevert(BulldotBondingCurve.ProtocolFeeExceedsLimit.selector);
+        new BulldotBondingCurve(
+            address(tokenBad),
+            address(b20Stock),
+            creator,
+            feeRecipient,
+            protocolFeeRecipient,
+            address(feeVault),
+            CREATOR_FEE_BPS,
+            11, // 11 bps (0.11%) exceeds 10 bps (0.10%) hard cap
+            TARGET_SHARES,
+            0,
+            address(0),
+            address(0)
+        );
     }
 }
