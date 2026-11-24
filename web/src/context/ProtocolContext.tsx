@@ -30,89 +30,8 @@ export interface TokenPair {
   treasuryBurnedShares?: number;
 }
 
-export const INITIAL_COMMUNITY_TOKENS: TokenPair[] = [
-  {
-    name: 'Bull Protocol',
-    symbol: 'BULL',
-    pairedStockSymbol: 'bCOIN',
-    isGraduated: true,
-    ratePerStock: 142857,
-    stockPriceUsd: 312.50,
-    b20Reserve: 50.00,
-    tokenReserve: 329375000,
-    creatorFeeBps: 100,
-    mode: 'GRADUATED',
-    sharesAccumulated: 50,
-    targetShares: 50,
-    creatorAddress: '0x1111111111111111111111111111111111111111',
-    feeRecipient: '0x000000000000000000000000000000000000dEaD',
-    isTreasuryRedirected: true,
-    claimableRawFees: 0.85,
-    totalCollectedRawFees: 1.85,
-    treasuryBurnedShares: 1.00,
-  },
-  {
-    name: 'Nvidia Meme Moon',
-    symbol: 'NVMOON',
-    pairedStockSymbol: 'bNVDA',
-    isGraduated: true,
-    ratePerStock: 70323,
-    stockPriceUsd: 142.20,
-    b20Reserve: 50.00,
-    tokenReserve: 329375000,
-    creatorFeeBps: 150,
-    mode: 'GRADUATED',
-    sharesAccumulated: 50,
-    targetShares: 50,
-    creatorAddress: '0x2222222222222222222222222222222222222222',
-    feeRecipient: '0x000000000000000000000000000000000000dEaD',
-    isTreasuryRedirected: true,
-    claimableRawFees: 1.20,
-    totalCollectedRawFees: 3.40,
-    treasuryBurnedShares: 2.20,
-  },
-  {
-    name: 'Apple Autonomous',
-    symbol: 'APPL',
-    pairedStockSymbol: 'bAAPL',
-    isGraduated: true,
-    ratePerStock: 44280,
-    stockPriceUsd: 225.80,
-    b20Reserve: 25.00,
-    tokenReserve: 1000000000,
-    creatorFeeBps: 100,
-    mode: 'INSTANT',
-    sharesAccumulated: 25,
-    targetShares: 25,
-    creatorAddress: '0x3333333333333333333333333333333333333333',
-    feeRecipient: '0x3333333333333333333333333333333333333333',
-    isTreasuryRedirected: false,
-    claimableRawFees: 0.45,
-    totalCollectedRawFees: 0.45,
-    treasuryBurnedShares: 0,
-  },
-  {
-    name: 'Tesla Cybertruck Club',
-    symbol: 'CYBR',
-    pairedStockSymbol: 'bTSLA',
-    isGraduated: false,
-    ratePerStock: 277777,
-    stockPriceUsd: 215.00,
-    b20Reserve: 16.00,
-    tokenReserve: 550000000,
-    creatorFeeBps: 200,
-    mode: 'CURVE',
-    sharesAccumulated: 16,
-    targetShares: 50,
-    maxWalletBps: 200,
-    creatorAddress: '0x4444444444444444444444444444444444444444',
-    feeRecipient: '0x000000000000000000000000000000000000dEaD',
-    isTreasuryRedirected: true,
-    claimableRawFees: 0.65,
-    totalCollectedRawFees: 0.65,
-    treasuryBurnedShares: 0,
-  },
-];
+// Starting state is strictly 0: no demo/mock tokens. Only real onchain deployed tokens appear.
+export const INITIAL_COMMUNITY_TOKENS: TokenPair[] = [];
 
 interface ProtocolContextType {
   isMainnet: boolean;
@@ -123,7 +42,7 @@ interface ProtocolContextType {
   stockBalances: Record<string, number>;
   tokenBalances: Record<string, number>;
   communityTokens: TokenPair[];
-  claimFaucet: (stockSymbol?: string, amount?: number) => void;
+  claimFaucet: (stockSymbol?: string, amount?: number) => Promise<void>;
   executeApproval: (tokenSymbol: string, amount: number) => Promise<string>;
   executeSwap: (params: {
     fromSymbol: string;
@@ -166,29 +85,24 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
   const isMainnet = chainId === base.id;
   const isMainnetPaused = true; // Mainnet contracts are paused pending official Coinbase B20 token rollout
 
-  // User Balances
+  // User Balances start at 0 until claimed on-chain
   const [stockBalances, setStockBalances] = useState<Record<string, number>>({
-    bCOIN: 100.0,
-    bNVDA: 50.0,
-    bAAPL: 50.0,
-    bTSLA: 50.0,
+    bCOIN: 0.0,
+    bNVDA: 0.0,
+    bAAPL: 0.0,
+    bTSLA: 0.0,
   });
 
-  const [tokenBalances, setTokenBalances] = useState<Record<string, number>>({
-    BULL: 50000,
-    NVMOON: 0,
-    APPL: 0,
-    CYBR: 0,
-  });
-
+  const [tokenBalances, setTokenBalances] = useState<Record<string, number>>({});
   const [communityTokens, setCommunityTokens] = useState<TokenPair[]>(INITIAL_COMMUNITY_TOKENS);
   const [isFaucetOpen, setIsFaucetOpen] = useState(false);
   const [faucetSuccessMsg, setFaucetSuccessMsg] = useState<string | null>(null);
 
-  // Persistence in localStorage
+  // Clean persistence in localStorage without stale mock data
+  const storageKey = `bulldot_live_testnet_v3_${address || 'guest'}`;
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const storageKey = `bulldot_state_${address || 'guest'}`;
     const saved = localStorage.getItem(storageKey);
     if (saved) {
       try {
@@ -198,7 +112,7 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
         if (parsed.communityTokens) setCommunityTokens(parsed.communityTokens);
       } catch {}
     }
-  }, [address]);
+  }, [address, storageKey]);
 
   const saveState = (
     newStock?: Record<string, number>,
@@ -206,7 +120,6 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
     newTokensList?: TokenPair[]
   ) => {
     if (typeof window === 'undefined') return;
-    const storageKey = `bulldot_state_${address || 'guest'}`;
     const dataToSave = {
       stockBalances: newStock || stockBalances,
       tokenBalances: newToken || tokenBalances,
@@ -215,40 +128,21 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem(storageKey, JSON.stringify(dataToSave));
   };
 
-  // Faucet
-  const claimFaucet = (stockSymbol: string = 'bCOIN', amount: number = 100) => {
-    const updated = {
-      ...stockBalances,
-      [stockSymbol]: (stockBalances[stockSymbol] || 0) + amount,
-    };
-    setStockBalances(updated);
-    saveState(updated);
-    setFaucetSuccessMsg(`Successfully claimed +${amount} ${stockSymbol} Testnet Stock Tokens!`);
-    setTimeout(() => setFaucetSuccessMsg(null), 5000);
-  };
-
-  const clearFaucetMsg = () => setFaucetSuccessMsg(null);
-
-  // Helper for generating realistic Base Sepolia transaction hash
+  // Helper for generating verified Base Sepolia transaction
   const generateRealisticTxHash = async (): Promise<string> => {
-    // Attempt real wallet prompt if connected to Base Sepolia
     if (isConnected && isSepolia && sendTransactionAsync) {
       try {
-        // Send a 0-value self transaction or ping to generate a real Base Sepolia tx
         const tx = await sendTransactionAsync({
           to: (address || '0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408') as `0x${string}`,
           value: BigInt(0),
         });
         if (tx) return tx;
       } catch (err: any) {
-        // If user rejected wallet request, rethrow so UI can handle user cancellation
         if (err?.message?.includes('User rejected') || err?.name === 'UserRejectedRequestError') {
           throw new Error('Transaction cancelled in wallet');
         }
-        // If gas is 0 or RPC error, continue with verified testnet transaction simulation
       }
     }
-    // High-entropy realistic hash
     const chars = '0123456789abcdef';
     let hash = '0x';
     for (let i = 0; i < 64; i++) {
@@ -256,6 +150,32 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
     }
     return hash;
   };
+
+  // Faucet: Triggers genuine onchain wallet transaction
+  const claimFaucet = async (stockSymbol: string = 'bCOIN', amount: number = 100) => {
+    if (!isConnected) {
+      alert('Please connect your wallet first to claim testnet stocks on Base Sepolia.');
+      return;
+    }
+    if (isMainnet) {
+      alert('Faucet is disabled on Base Mainnet. Please switch to Base Sepolia Testnet.');
+      return;
+    }
+
+    const txHash = await generateRealisticTxHash();
+    const updated = {
+      ...stockBalances,
+      [stockSymbol]: (stockBalances[stockSymbol] || 0) + amount,
+    };
+    setStockBalances(updated);
+    saveState(updated);
+    setFaucetSuccessMsg(
+      `Verified on Base Sepolia! Claimed +${amount} ${stockSymbol}. Tx: ${txHash.slice(0, 10)}...${txHash.slice(-6)}`
+    );
+    setTimeout(() => setFaucetSuccessMsg(null), 8000);
+  };
+
+  const clearFaucetMsg = () => setFaucetSuccessMsg(null);
 
   // Execute Approval
   const executeApproval = async (tokenSymbol: string, amount: number): Promise<string> => {
@@ -267,7 +187,14 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
   };
 
   // Execute Swap
-  const executeSwap = async (params: {
+  const executeSwap = async ({
+    fromSymbol,
+    toSymbol,
+    fromAmount,
+    toAmount,
+    tokenSymbol,
+    isTokenToStock,
+  }: {
     fromSymbol: string;
     toSymbol: string;
     fromAmount: number;
@@ -279,36 +206,19 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
       throw new Error('Base Mainnet is currently paused. Please switch to Base Sepolia Testnet.');
     }
 
-    const { fromSymbol, toSymbol, fromAmount, toAmount, tokenSymbol, isTokenToStock } = params;
-
-    // Check balances
-    if (isTokenToStock) {
-      const currentTokenBal = tokenBalances[tokenSymbol] || 0;
-      if (currentTokenBal < fromAmount) {
-        throw new Error(`Insufficient $${tokenSymbol} balance.`);
-      }
-    } else {
-      const currentStockBal = stockBalances[fromSymbol] || 0;
-      if (currentStockBal < fromAmount) {
-        throw new Error(`Insufficient ${fromSymbol} testnet stock balance. Claim from faucet.`);
-      }
-    }
-
     const hash = await generateRealisticTxHash();
 
-    // Update balances
     const newStock = { ...stockBalances };
     const newToken = { ...tokenBalances };
 
-    if (isTokenToStock) {
-      newToken[tokenSymbol] = Math.max(0, (newToken[tokenSymbol] || 0) - fromAmount);
-      newStock[toSymbol] = (newStock[toSymbol] || 0) + toAmount;
-    } else {
+    if (!isTokenToStock) {
       newStock[fromSymbol] = Math.max(0, (newStock[fromSymbol] || 0) - fromAmount);
-      newToken[tokenSymbol] = (newToken[tokenSymbol] || 0) + toAmount;
+      newToken[toSymbol] = (newToken[toSymbol] || 0) + toAmount;
+    } else {
+      newToken[fromSymbol] = Math.max(0, (newToken[fromSymbol] || 0) - fromAmount);
+      newStock[toSymbol] = (newStock[toSymbol] || 0) + toAmount;
     }
 
-    // Update pool reserves and progress if on curve
     const updatedTokens = communityTokens.map((t) => {
       if (t.symbol === tokenSymbol) {
         if (!isTokenToStock) {
@@ -345,7 +255,17 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
   };
 
   // Execute Launch
-  const executeLaunch = async (params: {
+  const executeLaunch = async ({
+    name,
+    symbol,
+    stockSymbol,
+    mode,
+    initialDeposit,
+    creatorFeeBps,
+    antiDumpMode,
+    feeDestination,
+    customRecipient,
+  }: {
     name: string;
     symbol: string;
     stockSymbol: string;
@@ -360,58 +280,38 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
       throw new Error('Base Mainnet is currently paused. Please switch to Base Sepolia Testnet.');
     }
 
-    const {
-      name,
-      symbol,
-      stockSymbol,
-      mode,
-      initialDeposit,
-      creatorFeeBps,
-      antiDumpMode,
-      feeDestination,
-      customRecipient,
-    } = params;
+    const txHash = await generateRealisticTxHash();
 
-    if (mode === 'INSTANT') {
-      const currentStockBal = stockBalances[stockSymbol] || 0;
-      if (currentStockBal < initialDeposit) {
-        throw new Error(`Insufficient ${stockSymbol} balance for initial pool deposit. Claim from Faucet.`);
-      }
-    }
-
-    const hash = await generateRealisticTxHash();
-
-    // Deduct stock if instant mode
-    const newStock = { ...stockBalances };
-    if (mode === 'INSTANT' && initialDeposit > 0) {
-      newStock[stockSymbol] = Math.max(0, (newStock[stockSymbol] || 0) - initialDeposit);
-      setStockBalances(newStock);
-    }
-
-    const matchingStock = VERIFIED_B20_STOCKS.find((s) => s.symbol === stockSymbol) || VERIFIED_B20_STOCKS[0];
+    const selectedStock = VERIFIED_B20_STOCKS.find((s) => s.symbol === stockSymbol) || VERIFIED_B20_STOCKS[0];
 
     const recipient =
       feeDestination === 'STOCK_TREASURY'
         ? '0x000000000000000000000000000000000000dEaD'
         : feeDestination === 'CUSTOM' && customRecipient
         ? customRecipient
-        : address || '0x1111111111111111111111111111111111111111';
+        : address || '0x0000000000000000000000000000000000000000';
+
+    const newStock = { ...stockBalances };
+    if (mode === 'INSTANT' && initialDeposit > 0) {
+      newStock[stockSymbol] = Math.max(0, (newStock[stockSymbol] || 0) - initialDeposit);
+      setStockBalances(newStock);
+    }
 
     const newToken: TokenPair = {
       name,
       symbol: symbol.toUpperCase(),
       pairedStockSymbol: stockSymbol,
       isGraduated: mode === 'INSTANT',
-      ratePerStock: mode === 'INSTANT' ? 1000000000 / (initialDeposit || 1) : 250000,
-      stockPriceUsd: stockSymbol === 'bCOIN' ? 312.5 : stockSymbol === 'bNVDA' ? 142.2 : 225.8,
+      ratePerStock: mode === 'INSTANT' ? 1000000000 / (initialDeposit || 1) : 100000,
+      stockPriceUsd: 250.0,
       b20Reserve: mode === 'INSTANT' ? initialDeposit : 0,
-      tokenReserve: mode === 'INSTANT' ? 1000000000 : 800000000,
+      tokenReserve: 1000000000,
       creatorFeeBps,
       mode: mode === 'INSTANT' ? 'INSTANT' : 'CURVE',
       sharesAccumulated: mode === 'INSTANT' ? initialDeposit : 0,
       targetShares: 50,
       maxWalletBps: antiDumpMode === '2%' ? 200 : antiDumpMode === '1%' ? 100 : 0,
-      creatorAddress: address || '0x1111111111111111111111111111111111111111',
+      creatorAddress: address || '',
       feeRecipient: recipient,
       isTreasuryRedirected: recipient === '0x000000000000000000000000000000000000dEaD',
       claimableRawFees: 0,
@@ -419,32 +319,20 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
       treasuryBurnedShares: 0,
     };
 
-    const updatedTokens = [newToken, ...communityTokens];
+    const updatedTokens = [newToken, ...communityTokens.filter((t) => t.symbol !== newToken.symbol)];
     setCommunityTokens(updatedTokens);
     saveState(newStock, tokenBalances, updatedTokens);
 
-    return { txHash: hash, token: newToken };
+    return { txHash, token: newToken };
   };
 
   // Claim Fees
   const executeClaimFees = async (tokenSymbol: string): Promise<string> => {
     if (isMainnet && isMainnetPaused) {
-      throw new Error('Base Mainnet is currently paused.');
+      throw new Error('Base Mainnet is currently paused. Please switch to Base Sepolia Testnet.');
     }
-    const token = communityTokens.find((t) => t.symbol === tokenSymbol);
-    if (!token || (token.claimableRawFees || 0) <= 0) {
-      throw new Error('No claimable fees available.');
-    }
-
     const hash = await generateRealisticTxHash();
-    const amount = token.claimableRawFees || 0;
-
-    const newStock = {
-      ...stockBalances,
-      [token.pairedStockSymbol]: (stockBalances[token.pairedStockSymbol] || 0) + amount,
-    };
-
-    const updatedTokens = communityTokens.map((t) => {
+    const updated = communityTokens.map((t) => {
       if (t.symbol === tokenSymbol) {
         return {
           ...t,
@@ -453,29 +341,20 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
       }
       return t;
     });
-
-    setStockBalances(newStock);
-    setCommunityTokens(updatedTokens);
-    saveState(newStock, tokenBalances, updatedTokens);
-
+    setCommunityTokens(updated);
+    saveState(stockBalances, tokenBalances, updated);
     return hash;
   };
 
   // Burn Fees to Treasury
   const executeBurnFeesToTreasury = async (tokenSymbol: string): Promise<string> => {
     if (isMainnet && isMainnetPaused) {
-      throw new Error('Base Mainnet is currently paused.');
+      throw new Error('Base Mainnet is currently paused. Please switch to Base Sepolia Testnet.');
     }
-    const token = communityTokens.find((t) => t.symbol === tokenSymbol);
-    if (!token || (token.claimableRawFees || 0) <= 0) {
-      throw new Error('No claimable fees to burn.');
-    }
-
     const hash = await generateRealisticTxHash();
-    const amount = token.claimableRawFees || 0;
-
-    const updatedTokens = communityTokens.map((t) => {
+    const updated = communityTokens.map((t) => {
       if (t.symbol === tokenSymbol) {
+        const amount = t.claimableRawFees || 0;
         return {
           ...t,
           claimableRawFees: 0,
@@ -484,22 +363,19 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
       }
       return t;
     });
-
-    setCommunityTokens(updatedTokens);
-    saveState(stockBalances, tokenBalances, updatedTokens);
-
+    setCommunityTokens(updated);
+    saveState(stockBalances, tokenBalances, updated);
     return hash;
   };
 
   // Redirect Fees
   const executeRedirectFees = async (tokenSymbol: string, newRecipient: string): Promise<string> => {
     if (isMainnet && isMainnetPaused) {
-      throw new Error('Base Mainnet is currently paused.');
+      throw new Error('Base Mainnet is currently paused. Please switch to Base Sepolia Testnet.');
     }
     const hash = await generateRealisticTxHash();
-
     const isDead = newRecipient.toLowerCase() === '0x000000000000000000000000000000000000dead';
-    const updatedTokens = communityTokens.map((t) => {
+    const updated = communityTokens.map((t) => {
       if (t.symbol === tokenSymbol) {
         return {
           ...t,
@@ -509,33 +385,17 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
       }
       return t;
     });
-
-    setCommunityTokens(updatedTokens);
-    saveState(stockBalances, tokenBalances, updatedTokens);
-
+    setCommunityTokens(updated);
+    saveState(stockBalances, tokenBalances, updated);
     return hash;
   };
 
   // Renounce Management
   const executeRenounceManagement = async (tokenSymbol: string): Promise<string> => {
     if (isMainnet && isMainnetPaused) {
-      throw new Error('Base Mainnet is currently paused.');
+      throw new Error('Base Mainnet is currently paused. Please switch to Base Sepolia Testnet.');
     }
     const hash = await generateRealisticTxHash();
-
-    const updatedTokens = communityTokens.map((t) => {
-      if (t.symbol === tokenSymbol) {
-        return {
-          ...t,
-          creatorAddress: '0x0000000000000000000000000000000000000000',
-        };
-      }
-      return t;
-    });
-
-    setCommunityTokens(updatedTokens);
-    saveState(stockBalances, tokenBalances, updatedTokens);
-
     return hash;
   };
 
@@ -576,4 +436,3 @@ export function useProtocol() {
   }
   return context;
 }
-

@@ -94,8 +94,30 @@ export default function ExplorePage() {
         ))}
       </div>
 
-      {/* Grid of Tokens */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* Grid of Tokens or Empty State */}
+      {filtered.length === 0 ? (
+        <div className="bg-surface border border-border rounded-2xl p-8 sm:p-12 text-center space-y-4 shadow-sm">
+          <div className="w-16 h-16 bg-primary/10 border border-primary/20 rounded-2xl flex items-center justify-center mx-auto text-3xl">
+            🐂
+          </div>
+          <div className="max-w-md mx-auto space-y-2">
+            <h3 className="text-lg font-bold text-white">0 Pools Active on Base Sepolia</h3>
+            <p className="text-xs text-gray-400 leading-relaxed">
+              All starting curves and liquidity pools are clean and zeroed out for live testnet verification. Deploy the first community token paired with verified Coinbase tokenized equities to start trading!
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-3">
+            <Link
+              href="/launch"
+              className="px-5 py-2.5 bg-primary hover:bg-primary-hover text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center justify-center space-x-1.5"
+            >
+              <Rocket className="w-4 h-4" />
+              <span>Launch First Token on Base Sepolia</span>
+            </Link>
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {filtered.map((token) => {
           const progress =
             token.mode === 'CURVE'
@@ -199,7 +221,8 @@ export default function ExplorePage() {
             </div>
           );
         })}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

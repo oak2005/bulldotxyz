@@ -41,6 +41,16 @@ contract MockB20Stock is IB20Stock {
         emit Transfer(address(0), to, amount);
     }
 
+    /**
+     * @notice Permissionless testnet faucet delivering +100 stock tokens to caller.
+     */
+    function faucet() external {
+        uint256 amount = 100 * 1e18;
+        totalSupply += amount;
+        balanceOf[msg.sender] += amount;
+        emit Transfer(address(0), msg.sender, amount);
+    }
+
     function setMultiplier(uint256 newMultiplier) external {
         if (newMultiplier == 0) revert ZeroMultiplier();
         emit MultiplierUpdated(multiplier, newMultiplier);

@@ -18,7 +18,9 @@ import {
   AlertTriangle,
   Pause,
   Lock,
+  Rocket,
 } from 'lucide-react';
+import Link from 'next/link';
 import { useProtocol, TokenPair } from '../../context/ProtocolContext';
 
 export default function DashboardPage() {
@@ -209,8 +211,32 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* TAB 1: METRICS & CLAIM */}
-      {activeTab === 'METRICS' && currentToken && (
+      {/* Empty State when no tokens exist */}
+      {communityTokens.length === 0 ? (
+        <div className="bg-surface border border-border rounded-2xl p-8 sm:p-12 text-center space-y-4 shadow-sm">
+          <div className="w-16 h-16 bg-primary/10 border border-primary/20 rounded-2xl flex items-center justify-center mx-auto text-3xl">
+            🏦
+          </div>
+          <div className="max-w-md mx-auto space-y-2">
+            <h3 className="text-lg font-bold text-white">No Managed Pools Yet</h3>
+            <p className="text-xs text-gray-400 leading-relaxed">
+              All starting curves and pools are clean and zeroed out for live testnet verification. Launch a community token on Base Sepolia to track and claim creator fees, execute stock buybacks, or direct yields to equity treasuries.
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-3">
+            <Link
+              href="/launch"
+              className="px-5 py-2.5 bg-primary hover:bg-primary-hover text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center justify-center space-x-1.5"
+            >
+              <Rocket className="w-4 h-4" />
+              <span>Launch First Token on Base Sepolia</span>
+            </Link>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* TAB 1: METRICS & CLAIM */}
+          {activeTab === 'METRICS' && currentToken && (
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {/* Card 1: Total Lifetime Collected */}
@@ -458,6 +484,8 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   );
