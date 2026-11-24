@@ -7,9 +7,10 @@ import Link from 'next/link';
 import { useProtocol, TokenPair } from '../../context/ProtocolContext';
 
 export default function ExplorePage() {
-  const { communityTokens } = useProtocol();
+  const { communityTokens, isLoadingPools, isSepolia } = useProtocol();
   const [filterStock, setFilterStock] = useState('ALL');
   const [filterMode, setFilterMode] = useState<'ALL' | 'V4' | 'CURVE'>('ALL');
+  const explorerUrl = isSepolia ? 'https://sepolia.basescan.org' : 'https://basescan.org';
 
   const filtered = communityTokens.filter((t) => {
     const stockMatch = filterStock === 'ALL' || t.pairedStockSymbol === filterStock;
@@ -95,7 +96,12 @@ export default function ExplorePage() {
       </div>
 
       {/* Grid of Tokens or Empty State */}
-      {filtered.length === 0 ? (
+      {isLoadingPools && communityTokens.length === 0 ? (
+        <div className="bg-surface border border-border rounded-2xl p-10 text-center space-y-3">
+          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-xs text-gray-400">Syncing live token pools from Base Sepolia...</p>
+        </div>
+      ) : filtered.length === 0 ? (
         <div className="bg-surface border border-border rounded-2xl p-8 sm:p-12 text-center space-y-4 shadow-sm">
           <div className="w-16 h-16 bg-primary/10 border border-primary/20 rounded-2xl flex items-center justify-center mx-auto text-3xl">
             🐂
@@ -127,7 +133,7 @@ export default function ExplorePage() {
 
           return (
             <div
-              key={token.symbol}
+              key={token.tokenAddress}
               className="bg-surface border border-border rounded-xl p-5 hover:border-gray-700 transition-all shadow-md space-y-4"
             >
               <div className="flex items-start justify-between">
@@ -209,8 +215,18 @@ export default function ExplorePage() {
                 </div>
 
                 <div className="flex items-center space-x-3">
+                  <a
+                    href={`${explorerUrl}/token/${token.tokenAddress}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center space-x-1 text-gray-400 hover:text-white"
+                    title={token.tokenAddress}
+                  >
+                    <span>BaseScan</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
                   <Link
-                    href={`/?pair=${token.symbol}`}
+                    href={`/?pair=${token.tokenAddress}`}
                     className="flex items-center space-x-1 text-primary hover:text-primary-hover font-semibold"
                   >
                     <span>Trade</span>

@@ -3,6 +3,7 @@ pragma solidity 0.8.26;
 
 import {Test, console2} from "forge-std/Test.sol";
 import {BulldotFactory} from "../src/BulldotFactory.sol";
+import {BulldotCurveDeployer} from "../src/BulldotCurveDeployer.sol";
 import {BulldotBondingCurve} from "../src/BulldotBondingCurve.sol";
 import {BulldotToken} from "../src/BulldotToken.sol";
 import {BulldotFeeVault} from "../src/BulldotFeeVault.sol";
@@ -34,6 +35,7 @@ contract BulldotFeeSystemTest is Test {
 
         feeVault = new BulldotFeeVault();
         b20Registry = new MockB20Registry();
+        BulldotCurveDeployer curveDeployer = new BulldotCurveDeployer();
 
         // Register bCOIN in official B20 Registry pattern
         b20Registry.registerStock(address(bCOIN), "COIN", "US19260Q1076", address(0));
@@ -46,6 +48,7 @@ contract BulldotFeeSystemTest is Test {
             owner,
             address(feeVault),
             address(b20Registry),
+            address(curveDeployer),
             emptyAllowlist
         );
 

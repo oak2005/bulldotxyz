@@ -3,6 +3,7 @@ pragma solidity 0.8.26;
 
 import {Test, console2} from "forge-std/Test.sol";
 import {BulldotFactory} from "../src/BulldotFactory.sol";
+import {BulldotCurveDeployer} from "../src/BulldotCurveDeployer.sol";
 import {BulldotBondingCurve} from "../src/BulldotBondingCurve.sol";
 import {BulldotToken} from "../src/BulldotToken.sol";
 import {BulldotFeeVault} from "../src/BulldotFeeVault.sol";
@@ -33,6 +34,7 @@ contract BulldotFactoryTest is Test {
         bCOIN = new MockB20Stock("Coinbase Tokenized Stock", "bCOIN");
         unverifiedStock = new MockB20Stock("Unverified Token", "FAKE");
         feeVault = new BulldotFeeVault();
+        BulldotCurveDeployer curveDeployer = new BulldotCurveDeployer();
 
         address[] memory verifiedList = new address[](1);
         verifiedList[0] = address(bCOIN);
@@ -43,6 +45,7 @@ contract BulldotFactoryTest is Test {
             protocolFeeRecipient,
             address(feeVault),
             address(0), // No registry for base factory test
+            address(curveDeployer),
             verifiedList
         );
 
@@ -276,6 +279,7 @@ contract BulldotFactoryTest is Test {
             0xc96147c68ca8e153e70B3bC4745b8d974bDd212A,
             address(feeVault),
             address(0),
+            address(new BulldotCurveDeployer()),
             verifiedList
         );
         assertEq(testnetFactory.protocolFeeRecipient(), 0xc96147c68ca8e153e70B3bC4745b8d974bDd212A);

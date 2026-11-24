@@ -3,7 +3,7 @@
 import React from 'react';
 import '@rainbow-me/rainbowkit/styles.css';
 import { getDefaultConfig, RainbowKitProvider, darkTheme } from '@rainbow-me/rainbowkit';
-import { WagmiProvider, http } from 'wagmi';
+import { WagmiProvider, http, fallback } from 'wagmi';
 import { base, baseSepolia } from 'wagmi/chains';
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
 import { ProtocolProvider } from './context/ProtocolContext';
@@ -13,8 +13,14 @@ const config = getDefaultConfig({
   projectId: 'a0b9435b866504a29a07119ff339e802', // Standard public walletconnect ID or demo ID
   chains: [baseSepolia, base],
   transports: {
-    [baseSepolia.id]: http('https://sepolia.base.org'),
-    [base.id]: http('https://mainnet.base.org'),
+    [baseSepolia.id]: fallback([
+      http('https://sepolia.base.org'),
+      http('https://base-sepolia-rpc.publicnode.com'),
+    ]),
+    [base.id]: fallback([
+      http('https://mainnet.base.org'),
+      http('https://base-rpc.publicnode.com'),
+    ]),
   },
   ssr: true,
 });

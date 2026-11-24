@@ -6,8 +6,11 @@
     "positionManager": "0x4b2c77d209d3405f41a037ec6c77f7f5b8e2ca80",
     "permit2": "0x000000000022D473030F116dDEE9F6B43aC78BA3"
   },
-  "b20Registry": "0x0000000000000000000000000000000000000000",
-  "feeVault": "0x0000000000000000000000000000000000000000",
+  "factory": "0xF74565Da7C686C3c23057A3A5Fc8782340e769A2",
+  "curveDeployer": "0x677e6430D98c48157928a16Ec109f3B06C3cE39E",
+  "router": "0x9B02cfc05e0fC3289a5584679F4ae171ceF68752",
+  "b20Registry": "0x098C0d1E4d7C8713EF1d92B2D3c67Cc923634C87",
+  "feeVault": "0x9bdaaC49737F20b8f04B2ea8692B737c35A72776",
   "protocolFeeRecipient": "0xc96147c68ca8e153e70B3bC4745b8d974bDd212A",
   "protocolFeeBps": 10,
   "maxProtocolFeeBps": 10,
@@ -15,13 +18,25 @@
     {
       "symbol": "bCOIN",
       "name": "Coinbase Tokenized Stock",
-      "address": "0x0000000000000000000000000000000000000001",
+      "address": "0xB91fcC29d586E2F8326d4E956160f3FDf289d1c5",
       "decimals": 18
     },
     {
       "symbol": "bNVDA",
       "name": "Nvidia Tokenized Stock",
-      "address": "0x0000000000000000000000000000000000000002",
+      "address": "0x1ad0e455458a67B91aae2d4C6cc9EF1CCc493EA5",
+      "decimals": 18
+    },
+    {
+      "symbol": "bAAPL",
+      "name": "Apple Tokenized Stock",
+      "address": "0xC31f5a66b19EbD0039fd0e3Ad31E6D0c57b017D2",
+      "decimals": 18
+    },
+    {
+      "symbol": "bTSLA",
+      "name": "Tesla Tokenized Stock",
+      "address": "0xa855bBe14a6b67487717cCB0E0cFa3A0fbEe9007",
       "decimals": 18
     }
   ],

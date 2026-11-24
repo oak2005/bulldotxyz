@@ -12,6 +12,10 @@ interface LiquidityViewerProps {
   isGraduated: boolean;
   b20Reserve: number;
   tokenReserve: number;
+  sharesAccumulated?: number;
+  targetShares?: number;
+  tokenAddress?: string;
+  curveAddress?: string;
   poolManagerAddress?: string;
 }
 
@@ -23,6 +27,10 @@ export function LiquidityViewer({
   isGraduated,
   b20Reserve,
   tokenReserve,
+  sharesAccumulated = 0,
+  targetShares = 50,
+  tokenAddress,
+  curveAddress,
   poolManagerAddress = '0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408',
 }: LiquidityViewerProps) {
   const chainId = useChainId();
@@ -67,7 +75,11 @@ export function LiquidityViewer({
           <span className="text-sm font-semibold text-gray-200 block">
             {isGraduated ? 'Uniswap v4 Native Pool' : 'Bonding Curve (Pre-Migration)'}
           </span>
-          <span className="text-xs text-gray-400">0.30% Fee Tier • Tick 60</span>
+          <span className="text-xs text-gray-400">
+            {isGraduated
+              ? '0.30% Fee Tier • Tick 60'
+              : `Graduation: ${sharesAccumulated.toFixed(2)} / ${targetShares} shares`}
+          </span>
         </div>
       </div>
 
@@ -109,13 +121,37 @@ export function LiquidityViewer({
         </p>
 
         <div className="flex flex-wrap items-center gap-3 pt-1 text-[11px]">
+          {curveAddress && curveAddress !== '0x0000000000000000000000000000000000000000' && (
+            <a
+              href={`${explorerUrl}/address/${curveAddress}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center space-x-1 text-primary hover:text-white underline"
+            >
+              <span>Inspect Bonding Curve</span>
+              <ExternalLink className="w-3 h-3" />
+            </a>
+          )}
+
+          {tokenAddress && (
+            <a
+              href={`${explorerUrl}/token/${tokenAddress}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center space-x-1 text-primary hover:text-white underline"
+            >
+              <span>Inspect Token Contract</span>
+              <ExternalLink className="w-3 h-3" />
+            </a>
+          )}
+
           <a
             href={`${explorerUrl}/address/${deadAddress}`}
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center space-x-1 text-primary hover:text-white underline"
+            className="flex items-center space-x-1 text-gray-300 hover:text-white underline"
           >
-            <span>Verify Burn Address (0x...dEaD)</span>
+            <span>Burn Address (0x...dEaD)</span>
             <ExternalLink className="w-3 h-3" />
           </a>
 

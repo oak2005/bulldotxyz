@@ -1,89 +1,77 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
-import { TrendingUp, TrendingDown, Clock, DollarSign, Coins } from 'lucide-react';
+import { TrendingUp, TrendingDown } from 'lucide-react';
+import { PricePoint } from '../context/ProtocolContext';
 
 interface PriceChartProps {
   tokenSymbol: string;
   stockSymbol: string;
   stockPriceUsd: number;
   multiplier: number;
+  ratePerStock: number;
+  volumeB20: number;
+  pricePoints: PricePoint[];
+  isGraduated: boolean;
 }
 
-type Timeframe = '1H' | '24H' | '7D' | '1M' | 'ALL';
+type Timeframe = '1H' | '24H' | '7D' | 'ALL';
 
 export function PriceChart({
   tokenSymbol,
   stockSymbol,
   stockPriceUsd,
   multiplier,
+  ratePerStock,
+  volumeB20,
+  pricePoints,
+  isGraduated,
 }: PriceChartProps) {
   const [timeframe, setTimeframe] = useState<Timeframe>('24H');
   const [displayMode, setDisplayMode] = useState<'STOCK' | 'USD'>('USD');
-  const [hoveredPoint, setHoveredPoint] = useState<{ x: number; y: number; price: number; time: string } | null>(null);
+  const [hoveredPoint, setHoveredPoint] = useState<{
+    x: number;
+    y: number;
+    price: number;
+    time: string;
+  } | null>(null);
 
-  // Deterministic, zero-maintenance historical price generator based on bonding curve dynamics
   const data = useMemo(() => {
-    const pointsCount = timeframe === '1H' ? 24 : timeframe === '24H' ? 36 : timeframe === '7D' ? 42 : 50;
-    const basePriceB20 = 0.000007; // 1 BULL = ~0.000007 bCOIN
-    const result = [];
-    const now = Date.now();
-    const intervalMs =
-      timeframe === '1H'
-        ? 2.5 * 60 * 1000
-        : timeframe === '24H'
-        ? 40 * 60 * 1000
-        : timeframe === '7D'
-        ? 4 * 3600 * 1000
-        : 24 * 3600 * 1000;
-
-    let current = basePriceB20 * (timeframe === '7D' ? 0.65 : timeframe === '1M' ? 0.45 : 0.88);
-
-    for (let i = pointsCount; i >= 0; i--) {
-      const timeMs = now - i * intervalMs;
-      // Deterministic curve growth with organic micro-oscillations
-      const wave = Math.sin(i * 0.45) * 0.04 + Math.cos(i * 0.8) * 0.025;
-      const upwardDrift = ((pointsCount - i) / pointsCount) * 0.28;
-      current = basePriceB20 * (0.85 + upwardDrift + wave);
-
-      const d = new Date(timeMs);
-      const timeStr =
-        timeframe === '1H' || timeframe === '24H'
-          ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-          : d.toLocaleDateString([], { month: 'short', day: 'numeric' });
-
-      result.push({
-        time: timeStr,
-        priceB20: current,
-        priceUsd: current * stockPriceUsd * multiplier,
-      });
+    if (pricePoints && pricePoints.length >= 2) {
+      return pricePoints;
     }
-    return result;
-  }, [timeframe, stockPriceUsd, multiplier]);
+    const spotB20 = ratePerStock > 0 ? 1 / ratePerStock : 0;
+    const spotUsd = spotB20 * stockPriceUsd * multiplier;
+    return [
+      { time: 'Launch', priceB20: spotB20, priceUsd: spotUsd },
+      { time: 'Now', priceB20: spotB20, priceUsd: spotUsd },
+    ];
+  }, [pricePoints, ratePerStock, stockPriceUsd, multiplier]);
 
   const activePrices = useMemo(() => {
     return data.map((d) => (displayMode === 'USD' ? d.priceUsd : d.priceB20));
   }, [data, displayMode]);
 
-  const currentPrice = activePrices[activePrices.length - 1];
-  const startPrice = activePrices[0];
-  const priceChange = ((currentPrice - startPrice) / startPrice) * 100;
+  const currentPrice = activePrices[activePrices.length - 1] || 0;
+  const startPrice = activePrices[0] || currentPrice;
+  const priceChange = startPrice > 0 ? ((currentPrice - startPrice) / startPrice) * 100 : 0;
   const isPositive = priceChange >= 0;
 
   const minPrice = Math.min(...activePrices);
   const maxPrice = Math.max(...activePrices);
-  const priceRange = maxPrice - minPrice || 1;
+  const priceRange = maxPrice - minPrice;
 
-  // SVG dimensions
   const width = 500;
   const height = 180;
   const paddingX = 10;
   const paddingY = 20;
 
-  // Generate smooth SVG Path
   const points = activePrices.map((price, idx) => {
-    const x = paddingX + (idx / (activePrices.length - 1)) * (width - 2 * paddingX);
-    const y = height - paddingY - ((price - minPrice) / priceRange) * (height - 2 * paddingY);
+    const x = paddingX + (idx / Math.max(1, activePrices.length - 1)) * (width - 2 * paddingX);
+    const y =
+      priceRange > 0
+        ? height - paddingY - ((price - minPrice) / priceRange) * (height - 2 * paddingY)
+        : height / 2;
     return { x, y, price, time: data[idx].time };
   });
 
@@ -93,49 +81,70 @@ export function PriceChart({
 
   const areaD = `${pathD} L ${points[points.length - 1].x} ${height} L ${points[0].x} ${height} Z`;
 
+  const volumeUsd = volumeB20 * stockPriceUsd;
+
   return (
     <div className="bg-surface border border-border rounded-2xl p-5 shadow-xl space-y-4">
       {/* Header: Token pair & Dual price headline */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <div className="flex items-center space-x-2 text-xs text-gray-400">
-            <span className="font-bold text-white text-base">${tokenSymbol} / {stockSymbol}</span>
+            <span className="font-bold text-white text-base">
+              ${tokenSymbol} / {stockSymbol}
+            </span>
             <span className="px-2 py-0.5 rounded-full text-[10px] bg-primary/20 text-primary border border-primary/40 font-semibold">
-              v4 Pool Live
+              {isGraduated ? 'v4 Pool Live' : 'On-Chain Curve'}
             </span>
           </div>
 
           <div className="flex items-baseline space-x-2 mt-1">
             <span className="text-2xl font-extrabold text-white">
-              {displayMode === 'USD' ? `$${currentPrice.toFixed(6)}` : `${currentPrice.toFixed(8)} ${stockSymbol}`}
+              {displayMode === 'USD'
+                ? `$${currentPrice.toFixed(8)}`
+                : `${currentPrice.toFixed(10)} ${stockSymbol}`}
             </span>
             <span
               className={`text-xs font-semibold flex items-center ${
                 isPositive ? 'text-success' : 'text-danger'
               }`}
             >
-              {isPositive ? <TrendingUp className="w-3.5 h-3.5 mr-0.5" /> : <TrendingDown className="w-3.5 h-3.5 mr-0.5" />}
-              {isPositive ? '+' : ''}{priceChange.toFixed(2)}%
+              {isPositive ? (
+                <TrendingUp className="w-3.5 h-3.5 mr-0.5" />
+              ) : (
+                <TrendingDown className="w-3.5 h-3.5 mr-0.5" />
+              )}
+              {isPositive ? '+' : ''}
+              {priceChange.toFixed(2)}%
             </span>
           </div>
 
           <div className="text-[11px] text-gray-400 mt-0.5">
             {displayMode === 'USD' ? (
-              <span>1 {tokenSymbol} ≈ {(currentPrice / (stockPriceUsd * multiplier)).toFixed(8)} {stockSymbol}</span>
+              <span>
+                1 {tokenSymbol} ≈{' '}
+                {(stockPriceUsd * multiplier > 0
+                  ? currentPrice / (stockPriceUsd * multiplier)
+                  : 0
+                ).toFixed(10)}{' '}
+                {stockSymbol}
+              </span>
             ) : (
-              <span>1 {tokenSymbol} ≈ ${(currentPrice * stockPriceUsd * multiplier).toFixed(6)} USD</span>
+              <span>
+                1 {tokenSymbol} ≈ ${(currentPrice * stockPriceUsd * multiplier).toFixed(8)} USD
+              </span>
             )}
           </div>
         </div>
 
-        {/* Controls: Timeframe & Dual Display Selector */}
+        {/* Controls: Display Mode & Timeframe */}
         <div className="flex items-center space-x-2">
-          {/* Display Mode Toggle */}
           <div className="flex bg-background border border-border rounded-lg p-0.5 text-xs">
             <button
               onClick={() => setDisplayMode('USD')}
               className={`px-2 py-1 rounded-md font-medium transition-all ${
-                displayMode === 'USD' ? 'bg-primary text-white shadow-sm' : 'text-gray-400 hover:text-white'
+                displayMode === 'USD'
+                  ? 'bg-primary text-white shadow-sm'
+                  : 'text-gray-400 hover:text-white'
               }`}
               title="Show prices in USD"
             >
@@ -144,7 +153,9 @@ export function PriceChart({
             <button
               onClick={() => setDisplayMode('STOCK')}
               className={`px-2 py-1 rounded-md font-medium transition-all ${
-                displayMode === 'STOCK' ? 'bg-primary text-white shadow-sm' : 'text-gray-400 hover:text-white'
+                displayMode === 'STOCK'
+                  ? 'bg-primary text-white shadow-sm'
+                  : 'text-gray-400 hover:text-white'
               }`}
               title={`Show prices in ${stockSymbol}`}
             >
@@ -152,14 +163,15 @@ export function PriceChart({
             </button>
           </div>
 
-          {/* Timeframe Pills */}
           <div className="flex bg-background border border-border rounded-lg p-0.5 text-xs">
             {(['1H', '24H', '7D', 'ALL'] as Timeframe[]).map((tf) => (
               <button
                 key={tf}
                 onClick={() => setTimeframe(tf)}
                 className={`px-2 py-1 rounded-md font-medium transition-all ${
-                  timeframe === tf ? 'bg-surface-hover text-white shadow-sm' : 'text-gray-400 hover:text-white'
+                  timeframe === tf
+                    ? 'bg-surface-hover text-white shadow-sm'
+                    : 'text-gray-400 hover:text-white'
                 }`}
               >
                 {tf}
@@ -183,18 +195,41 @@ export function PriceChart({
             </linearGradient>
           </defs>
 
-          {/* Background grid lines */}
-          <line x1="0" y1={paddingY} x2={width} y2={paddingY} stroke="rgba(255,255,255,0.06)" strokeDasharray="3 3" />
-          <line x1="0" y1={height / 2} x2={width} y2={height / 2} stroke="rgba(255,255,255,0.06)" strokeDasharray="3 3" />
-          <line x1="0" y1={height - paddingY} x2={width} y2={height - paddingY} stroke="rgba(255,255,255,0.06)" strokeDasharray="3 3" />
+          <line
+            x1="0"
+            y1={paddingY}
+            x2={width}
+            y2={paddingY}
+            stroke="rgba(255,255,255,0.06)"
+            strokeDasharray="3 3"
+          />
+          <line
+            x1="0"
+            y1={height / 2}
+            x2={width}
+            y2={height / 2}
+            stroke="rgba(255,255,255,0.06)"
+            strokeDasharray="3 3"
+          />
+          <line
+            x1="0"
+            y1={height - paddingY}
+            x2={width}
+            y2={height - paddingY}
+            stroke="rgba(255,255,255,0.06)"
+            strokeDasharray="3 3"
+          />
 
-          {/* Filled Area */}
           <path d={areaD} fill="url(#priceGradient)" />
+          <path
+            d={pathD}
+            fill="none"
+            stroke="#3B82F6"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
 
-          {/* Glowing Stroke */}
-          <path d={pathD} fill="none" stroke="#3B82F6" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
-
-          {/* Interactive Hover Point */}
           {hoveredPoint && (
             <>
               <line
@@ -217,7 +252,6 @@ export function PriceChart({
             </>
           )}
 
-          {/* Transparent Hover Hitbox Overlay */}
           {points.map((pt, i) => (
             <rect
               key={i}
@@ -232,7 +266,6 @@ export function PriceChart({
           ))}
         </svg>
 
-        {/* Hover Tooltip Popup */}
         {hoveredPoint && (
           <div
             className="absolute -top-3 pointer-events-none transform -translate-x-1/2 bg-background border border-primary/50 text-white rounded-lg px-2.5 py-1 text-[11px] shadow-lg shadow-black/60 z-20"
@@ -240,34 +273,35 @@ export function PriceChart({
           >
             <div className="font-bold">
               {displayMode === 'USD'
-                ? `$${hoveredPoint.price.toFixed(6)}`
-                : `${hoveredPoint.price.toFixed(8)} ${stockSymbol}`}
+                ? `$${hoveredPoint.price.toFixed(8)}`
+                : `${hoveredPoint.price.toFixed(10)} ${stockSymbol}`}
             </div>
             <div className="text-[10px] text-gray-400">{hoveredPoint.time}</div>
           </div>
         )}
       </div>
 
-      {/* 24h Metrics Ticker */}
+      {/* On-Chain Metrics Ticker */}
       <div className="grid grid-cols-3 gap-2 pt-3 border-t border-border/80 text-center text-xs">
         <div>
-          <span className="text-[11px] text-gray-400 block">24h High</span>
+          <span className="text-[11px] text-gray-400 block">Period High</span>
           <span className="font-semibold text-gray-200">
-            {displayMode === 'USD' ? `$${maxPrice.toFixed(6)}` : `${maxPrice.toFixed(8)}`}
+            {displayMode === 'USD' ? `$${maxPrice.toFixed(8)}` : `${maxPrice.toFixed(10)}`}
           </span>
         </div>
         <div>
-          <span className="text-[11px] text-gray-400 block">24h Low</span>
+          <span className="text-[11px] text-gray-400 block">Period Low</span>
           <span className="font-semibold text-gray-200">
-            {displayMode === 'USD' ? `$${minPrice.toFixed(6)}` : `${minPrice.toFixed(8)}`}
+            {displayMode === 'USD' ? `$${minPrice.toFixed(8)}` : `${minPrice.toFixed(10)}`}
           </span>
         </div>
         <div>
-          <span className="text-[11px] text-gray-400 block">24h Volume</span>
-          <span className="font-semibold text-primary">124.50 {stockSymbol} (~$38.9k)</span>
+          <span className="text-[11px] text-gray-400 block">On-Chain Volume</span>
+          <span className="font-semibold text-primary">
+            {volumeB20.toFixed(2)} {stockSymbol} (~${volumeUsd.toFixed(2)})
+          </span>
         </div>
       </div>
     </div>
   );
 }
-

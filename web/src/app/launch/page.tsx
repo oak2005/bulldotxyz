@@ -116,13 +116,28 @@ export default function LaunchPage() {
           </div>
 
           <p className="text-green-300/80 leading-relaxed">
-            <strong>${deployedToken.symbol}</strong> ({deployedToken.name}) is deployed via BulldotFactory and paired with{' '}
-            <strong>{deployedToken.pairedStockSymbol}</strong>. Permanent liquidity is locked to 0x...dEaD forever. Official verification badge granted.
+            <strong>${deployedToken.symbol}</strong> ({deployedToken.name}) is deployed on Base Sepolia via BulldotFactory and paired with{' '}
+            <strong>{deployedToken.pairedStockSymbol}</strong>. Official verification badge (`isOfficialLaunch`) granted on-chain.
           </p>
+
+          {deployedToken.tokenAddress !== '0x0000000000000000000000000000000000000000' && (
+            <div className="text-[11px] font-mono text-green-200/90 flex items-center gap-2">
+              <span>Token Contract:</span>
+              <a
+                href={`${explorerUrl}/token/${deployedToken.tokenAddress}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="underline hover:text-white flex items-center gap-1"
+              >
+                <span>{deployedToken.tokenAddress}</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+          )}
 
           <div className="pt-2 flex items-center space-x-3">
             <Link
-              href={`/?pair=${deployedToken.symbol}`}
+              href={`/?pair=${deployedToken.tokenAddress !== '0x0000000000000000000000000000000000000000' ? deployedToken.tokenAddress : deployedToken.symbol}`}
               className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-xl font-bold flex items-center space-x-1.5 transition-all shadow-md"
             >
               <span>Trade ${deployedToken.symbol} Now</span>

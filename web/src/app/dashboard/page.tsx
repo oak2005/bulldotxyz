@@ -54,18 +54,33 @@ export default function DashboardPage() {
   const claimable = currentToken?.claimableRawFees || 0;
   const totalCollected = currentToken?.totalCollectedRawFees || 0;
   const burnedShares = currentToken?.treasuryBurnedShares || 0;
+  const isTokenManager = Boolean(
+    address &&
+      currentToken?.tokenManager &&
+      address.toLowerCase() === currentToken.tokenManager.toLowerCase()
+  );
+  const isFeeRecipient = Boolean(
+    address &&
+      currentToken?.feeRecipient &&
+      address.toLowerCase() === currentToken.feeRecipient.toLowerCase()
+  );
+  const canClaimFees = Boolean(
+    currentToken &&
+      claimable > 0 &&
+      (currentToken.isTreasuryRedirected || isTokenManager || isFeeRecipient)
+  );
 
   const handleClaim = async () => {
-    if (!currentToken || claimable <= 0) return;
+    if (!currentToken || !canClaimFees) return;
     setIsClaiming(true);
     setErrorMessage(null);
 
     try {
       let hash = '';
       if (currentToken.isTreasuryRedirected) {
-        hash = await executeBurnFeesToTreasury(currentToken.symbol);
+        hash = await executeBurnFeesToTreasury(currentToken.tokenAddress);
       } else {
-        hash = await executeClaimFees(currentToken.symbol);
+        hash = await executeClaimFees(currentToken.tokenAddress);
       }
       setLastTxHash(hash);
       setTimeout(() => setLastTxHash(null), 8000);
@@ -83,7 +98,7 @@ export default function DashboardPage() {
     setErrorMessage(null);
 
     try {
-      const hash = await executeRedirectFees(currentToken.symbol, newRecipient);
+      const hash = await executeRedirectFees(currentToken.tokenAddress, newRecipient);
       setLastTxHash(hash);
       setNewRecipient('');
       setTimeout(() => setLastTxHash(null), 8000);
@@ -106,7 +121,7 @@ export default function DashboardPage() {
     setErrorMessage(null);
 
     try {
-      const hash = await executeRenounceManagement(currentToken.symbol);
+      const hash = await executeRenounceManagement(currentToken.tokenAddress);
       setLastTxHash(hash);
       setTimeout(() => setLastTxHash(null), 8000);
     } catch (err: any) {
@@ -169,7 +184,7 @@ export default function DashboardPage() {
           <div className="flex items-center space-x-2 overflow-x-auto">
             {communityTokens.map((token, idx) => (
               <button
-                key={token.symbol}
+                key={token.tokenAddress}
                 onClick={() => setSelectedTokenIndex(idx)}
                 className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
                   selectedTokenIndex === idx
@@ -290,7 +305,7 @@ export default function DashboardPage() {
                 </button>
               ) : (
                 <button
-                  disabled={!isConnected || isClaiming || claimable <= 0}
+                  disabled={!isConnected || isClaiming || !canClaimFees}
                   onClick={handleClaim}
                   className={`w-full py-2.5 rounded-lg text-xs font-bold transition-colors flex items-center justify-center space-x-1.5 ${
                     currentToken.isTreasuryRedirected
@@ -394,10 +409,20 @@ export default function DashboardPage() {
                   <Pause className="w-3.5 h-3.5 text-amber-400" />
                   <span>Mainnet Paused — Switch to Base Sepolia Testnet</span>
                 </button>
+              ) : currentToken.isManagerRenounced ? (
+                <div className="p-3 rounded-xl bg-amber-950/40 border border-amber-800/60 text-xs text-amber-200 flex items-center space-x-2">
+                  <Lock className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>Management rights for ${currentToken.symbol} are permanently renounced on-chain. Fee routing is immutable.</span>
+                </div>
               ) : (
                 <>
+                  {!isTokenManager && isConnected && (
+                    <div className="p-2.5 rounded-xl bg-background border border-border text-[11px] text-amber-300">
+                      Connected wallet is not the registered on-chain manager ({currentToken.tokenManager?.slice(0, 6)}...{currentToken.tokenManager?.slice(-4)}).
+                    </div>
+                  )}
                   <button
-                    disabled={!isConnected || isRedirecting || !newRecipient}
+                    disabled={!isConnected || !isTokenManager || isRedirecting || !newRecipient}
                     onClick={handleRedirect}
                     className="w-full py-3 bg-primary hover:bg-primary-hover disabled:bg-surface-hover disabled:text-gray-500 text-white rounded-xl font-bold text-xs transition-all flex items-center justify-center space-x-2 shadow-md"
                   >
@@ -412,9 +437,9 @@ export default function DashboardPage() {
                   </button>
 
                   <button
-                    disabled={!isConnected || isRenouncing}
+                    disabled={!isConnected || !isTokenManager || isRenouncing}
                     onClick={handleRenounce}
-                    className="w-full py-2.5 bg-background hover:bg-surface border border-red-900/50 hover:border-red-700 text-red-400 rounded-xl font-semibold text-xs transition-colors flex items-center justify-center space-x-1.5"
+                    className="w-full py-2.5 bg-background hover:bg-surface disabled:opacity-50 border border-red-900/50 hover:border-red-700 text-red-400 rounded-xl font-semibold text-xs transition-colors flex items-center justify-center space-x-1.5"
                     title="Permanently relinquishes creator ability to change the recipient."
                   >
                     <Lock className="w-3.5 h-3.5" />
@@ -448,7 +473,7 @@ export default function DashboardPage() {
                 .filter((t) => t.isTreasuryRedirected)
                 .map((token) => (
                   <div
-                    key={token.symbol}
+                    key={token.tokenAddress}
                     className="p-4 bg-background border border-border rounded-xl space-y-3"
                   >
                     <div className="flex items-center justify-between">

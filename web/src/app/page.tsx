@@ -26,11 +26,10 @@ import {
 } from 'lucide-react';
 import { useAccount, useChainId, useSwitchChain } from 'wagmi';
 import { baseSepolia } from 'wagmi/chains';
-import { useProtocol, TokenPair } from '../context/ProtocolContext';
+import { useProtocol, TokenPair, SwapQuoteResult } from '../context/ProtocolContext';
 
 function SwapContent() {
-  const { isConnected, address } = useAccount();
-  const chainId = useChainId();
+  const { isConnected } = useAccount();
   const { switchChain } = useSwitchChain();
   const searchParams = useSearchParams();
 
@@ -38,31 +37,27 @@ function SwapContent() {
     isMainnet,
     isSepolia,
     isMainnetPaused,
+    isLoadingPools,
     stockBalances,
     tokenBalances,
     communityTokens,
+    getSwapQuote,
     executeApproval,
     executeSwap,
     setIsFaucetOpen,
   } = useProtocol();
 
-  // Active pair selection
+  // Active pair selection (supports matching by contract address or ticker symbol)
   const requestedPair = searchParams.get('pair');
-  const [activeToken, setActiveToken] = useState<TokenPair | null>(() => {
-    if (requestedPair && communityTokens.length > 0) {
-      const match = communityTokens.find(
-        (t) => t.symbol.toUpperCase() === requestedPair.toUpperCase()
-      );
-      if (match) return match;
-    }
-    return communityTokens.length > 0 ? communityTokens[0] : null;
-  });
+  const [activeToken, setActiveToken] = useState<TokenPair | null>(null);
 
-  // Keep activeToken in sync if communityTokens updates
+  // Keep activeToken in sync with live on-chain communityTokens
   useEffect(() => {
     if (requestedPair && communityTokens.length > 0) {
       const match = communityTokens.find(
-        (t) => t.symbol.toUpperCase() === requestedPair.toUpperCase()
+        (t) =>
+          t.tokenAddress.toLowerCase() === requestedPair.toLowerCase() ||
+          t.symbol.toUpperCase() === requestedPair.toUpperCase()
       );
       if (match) {
         setActiveToken(match);
@@ -70,7 +65,9 @@ function SwapContent() {
       }
     }
     if (activeToken) {
-      const currentStillExists = communityTokens.find((t) => t.symbol === activeToken.symbol);
+      const currentStillExists = communityTokens.find(
+        (t) => t.tokenAddress.toLowerCase() === activeToken.tokenAddress.toLowerCase()
+      );
       if (currentStillExists) {
         setActiveToken(currentStillExists);
       } else if (communityTokens.length > 0) {
@@ -81,27 +78,61 @@ function SwapContent() {
     } else if (communityTokens.length > 0) {
       setActiveToken(communityTokens[0]);
     }
-  }, [communityTokens, requestedPair, activeToken]);
+  }, [communityTokens, requestedPair]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const activeStock =
     (activeToken && VERIFIED_B20_STOCKS.find((s) => s.symbol === activeToken.pairedStockSymbol)) ||
     VERIFIED_B20_STOCKS[0];
 
   const [activeTab, setActiveTab] = useState<'SWAP' | 'LIQUIDITY'>('SWAP');
-  const [fromAmount, setFromAmount] = useState('1');
+  const [fromAmount, setFromAmount] = useState('0.1');
   const [isTokenToStock, setIsTokenToStock] = useState(false);
   const [slippage, setSlippage] = useState('0.5');
   const [customSlippage, setCustomSlippage] = useState('');
   const [showSettings, setShowSettings] = useState(false);
+
+  // Live on-chain quote state from BulldotRouter.getQuote
+  const [onChainQuote, setOnChainQuote] = useState<SwapQuoteResult | null>(null);
+  const [isQuoting, setIsQuoting] = useState(false);
 
   // Execution states
   const [txState, setTxState] = useState<'IDLE' | 'APPROVING' | 'SWAPPING' | 'CONFIRMED'>('IDLE');
   const [lastTxHash, setLastTxHash] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const mockMultiplier = 1.0; // 1 Token = 1 Share
+  const mockMultiplier = 1.0; // 1 Token = 1 Share unless split updated on-chain
   const parsedFrom = parseFloat(fromAmount) || 0;
   const effectiveSlippage = customSlippage ? parseFloat(customSlippage) || 0.5 : parseFloat(slippage);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!activeToken || parsedFrom <= 0) {
+      setOnChainQuote(null);
+      setIsQuoting(false);
+      return;
+    }
+
+    setIsQuoting(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await getSwapQuote(activeToken.tokenAddress, fromAmount, isTokenToStock);
+        if (!cancelled) {
+          setOnChainQuote(res);
+          setIsQuoting(false);
+        }
+      } catch {
+        if (!cancelled) {
+          setOnChainQuote(null);
+          setIsQuoting(false);
+        }
+      }
+    }, 150);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [activeToken?.tokenAddress, activeToken?.b20Reserve, fromAmount, parsedFrom, isTokenToStock]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Balances
   const stockBalance = stockBalances[activeStock.symbol] || 0;
@@ -109,10 +140,12 @@ function SwapContent() {
   const userPayingBalance = isTokenToStock ? tokenBalance : stockBalance;
   const userReceivingBalance = isTokenToStock ? stockBalance : tokenBalance;
 
-  const rate = activeToken?.ratePerStock || 100000;
-  const rawToAmount = isTokenToStock ? parsedFrom / rate : parsedFrom * rate;
+  const rate = activeToken?.ratePerStock || 35766667;
+  const rawToAmount = onChainQuote ? onChainQuote.amountOut : 0;
 
-  const formattedToAmount = isTokenToStock
+  const formattedToAmount = isQuoting
+    ? '...'
+    : isTokenToStock
     ? rawToAmount.toFixed(6)
     : Math.floor(rawToAmount).toLocaleString();
 
@@ -120,27 +153,26 @@ function SwapContent() {
     maximumFractionDigits: isTokenToStock ? 6 : 0,
   });
 
-  const b20Res = activeToken?.b20Reserve || 0;
-  const tradeSizeInB20 = isTokenToStock ? rawToAmount : parsedFrom;
-  const priceImpact =
-    b20Res > 0
-      ? Math.min(25.0, (tradeSizeInB20 / (b20Res + tradeSizeInB20)) * 100).toFixed(2)
-      : '0.10';
-
+  const priceImpact = onChainQuote ? (onChainQuote.priceImpactBps / 100).toFixed(2) : '0.00';
   const numericPriceImpact = parseFloat(priceImpact);
 
-  // Fees
+  // Fees from on-chain quote
   const creatorFeePercent = (activeToken?.creatorFeeBps || 100) / 100;
-  const poolFeePercent = 0.3; // 0.30% Uniswap v4 standard
-  const treasuryFeePercent = isSepolia ? 0.1 : 0.0; // Hard-capped at 0.10% (10 bps) for testnet only
-  const estimatedFeeB20 = (
-    (tradeSizeInB20 * (creatorFeePercent + poolFeePercent + treasuryFeePercent)) /
-    100
-  ).toFixed(4);
+  const poolFeePercent = activeToken?.isGraduated ? 0.3 : 0.0;
+  const estimatedFeeB20 = onChainQuote ? onChainQuote.fee.toFixed(6) : '0.0000';
+
+  // Anti-sniper max-wallet guard (prevents predictable reverted txs)
+  const exceedsMaxWallet = Boolean(
+    !isTokenToStock &&
+      activeToken &&
+      !activeToken.isGraduated &&
+      (activeToken.maxWalletTokens || 0) > 0 &&
+      tokenBalance + rawToAmount > (activeToken.maxWalletTokens || 0)
+  );
 
   // Token USD equivalent
-  const stockUsd = activeToken?.stockPriceUsd || 250.0;
-  const tokenPriceUsd = (stockUsd / rate).toFixed(6);
+  const stockUsd = activeToken?.stockPriceUsd || activeStock.referencePriceUsd;
+  const tokenPriceUsd = rate > 0 ? (stockUsd / rate).toFixed(8) : '0.00000000';
 
   const handleMaxClick = () => {
     if (userPayingBalance > 0) {
@@ -149,20 +181,27 @@ function SwapContent() {
   };
 
   const handleSwap = async () => {
-    if (!activeToken || parsedFrom <= 0 || parsedFrom > userPayingBalance) return;
+    if (!activeToken || parsedFrom <= 0 || parsedFrom > userPayingBalance || exceedsMaxWallet) return;
     setErrorMessage(null);
 
     try {
+      const assetToApprove = isTokenToStock
+        ? activeToken.tokenAddress
+        : activeStock.address[baseSepolia.id];
+
       setTxState('APPROVING');
-      await executeApproval(isTokenToStock ? activeToken.symbol : activeStock.symbol, parsedFrom);
+      await executeApproval(assetToApprove, fromAmount);
+
+      const quotedWei = onChainQuote?.amountOutWei || BigInt(0);
+      const slippageFactor = BigInt(Math.max(0, Math.round(10_000 - effectiveSlippage * 100)));
+      const minAmountOutWei = (quotedWei * slippageFactor) / BigInt(10_000);
 
       setTxState('SWAPPING');
       const hash = await executeSwap({
-        fromSymbol: isTokenToStock ? activeToken.symbol : activeStock.symbol,
-        toSymbol: isTokenToStock ? activeStock.symbol : activeToken.symbol,
-        fromAmount: parsedFrom,
-        toAmount: rawToAmount,
-        tokenSymbol: activeToken.symbol,
+        tokenAddress: activeToken.tokenAddress,
+        stockAddress: activeStock.address[baseSepolia.id],
+        fromAmount,
+        minAmountOutWei,
         isTokenToStock,
       });
 
@@ -190,7 +229,12 @@ function SwapContent() {
         </p>
       </div>
 
-      {communityTokens.length === 0 ? (
+      {isLoadingPools && communityTokens.length === 0 ? (
+        <div className="bg-surface border border-border rounded-2xl p-10 text-center space-y-3 max-w-xl mx-auto">
+          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-xs text-gray-400">Syncing live pools & contracts from Base Sepolia...</p>
+        </div>
+      ) : communityTokens.length === 0 ? (
         /* Zero State: No tokens deployed yet */
         <div className="bg-surface border border-border rounded-2xl p-8 sm:p-10 text-center space-y-5 max-w-xl mx-auto shadow-2xl animate-fadeIn">
           <div className="w-16 h-16 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary text-3xl mx-auto">
@@ -229,6 +273,10 @@ function SwapContent() {
               stockSymbol={activeStock.symbol}
               stockPriceUsd={activeToken.stockPriceUsd}
               multiplier={mockMultiplier}
+              ratePerStock={activeToken.ratePerStock}
+              volumeB20={activeToken.volumeB20}
+              pricePoints={activeToken.pricePoints}
+              isGraduated={activeToken.isGraduated}
             />
 
             {/* Quick Token Selector Pills */}
@@ -237,10 +285,10 @@ function SwapContent() {
               <div className="flex items-center space-x-1.5 overflow-x-auto">
                 {communityTokens.map((token) => (
                   <button
-                    key={token.symbol}
+                    key={token.tokenAddress}
                     onClick={() => setActiveToken(token)}
                     className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
-                      activeToken.symbol === token.symbol
+                      activeToken.tokenAddress === token.tokenAddress
                         ? 'bg-primary text-white shadow-md'
                         : 'bg-background text-gray-400 hover:text-white border border-border'
                     }`}
@@ -487,7 +535,7 @@ function SwapContent() {
                   <div className="flex justify-between text-gray-400">
                     <span>Trading Fees</span>
                     <span className="text-gray-200 text-[11px]">
-                      {creatorFeePercent}% Creator + {poolFeePercent}% v4 LP
+                      {creatorFeePercent}% Creator{activeToken?.isGraduated ? ` + ${poolFeePercent}% v4 LP` : ''}
                       {isSepolia && ' + 0.10% Treasury'} (~{estimatedFeeB20} {activeStock.symbol})
                     </span>
                   </div>
@@ -574,9 +622,18 @@ function SwapContent() {
                         </button>
                       )}
                     </div>
+                  ) : exceedsMaxWallet ? (
+                    <div className="space-y-2">
+                      <button
+                        disabled
+                        className="w-full py-3.5 bg-amber-950/60 border border-amber-800 text-amber-300 rounded-xl font-bold cursor-not-allowed text-xs"
+                      >
+                        Exceeds Fair-Launch Max-Wallet Cap ({((activeToken.maxWalletBps || 200) / 100).toFixed(1)}%) — Lower Trade Amount
+                      </button>
+                    </div>
                   ) : (
                     <button
-                      disabled={parsedFrom <= 0 || txState !== 'IDLE'}
+                      disabled={parsedFrom <= 0 || isQuoting || txState !== 'IDLE'}
                       onClick={handleSwap}
                       className="w-full py-3.5 bg-primary hover:bg-primary-hover disabled:bg-surface-hover disabled:text-gray-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-primary/20 flex items-center justify-center space-x-2 text-xs"
                     >
@@ -593,7 +650,7 @@ function SwapContent() {
                         </>
                       )}
                       {txState === 'IDLE' && <span>Swap {activeStock.symbol} / ${activeToken.symbol}</span>}
-                      {txState === 'CONFIRMED' && <span>Trade Succeeded!</span>}
+                      {txState === 'CONFIRMED' && <span>Trade Confirmed On-Chain!</span>}
                     </button>
                   )}
                 </div>
@@ -608,6 +665,10 @@ function SwapContent() {
                 isGraduated={activeToken.isGraduated}
                 b20Reserve={activeToken.b20Reserve}
                 tokenReserve={activeToken.tokenReserve}
+                sharesAccumulated={activeToken.sharesAccumulated}
+                targetShares={activeToken.targetShares}
+                tokenAddress={activeToken.tokenAddress}
+                curveAddress={activeToken.curveAddress}
               />
             )}
           </div>

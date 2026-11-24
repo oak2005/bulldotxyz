@@ -33,6 +33,7 @@ export function Header() {
     isFaucetOpen,
     setIsFaucetOpen,
     faucetSuccessMsg,
+    faucetTxHash,
     clearFaucetMsg,
   } = useProtocol();
 
@@ -42,6 +43,40 @@ export function Header() {
 
   const [selectedStock, setSelectedStock] = useState('bCOIN');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isClaimingFaucet, setIsClaimingFaucet] = useState(false);
+  const [claimingProgress, setClaimingProgress] = useState<string | null>(null);
+  const [faucetError, setFaucetError] = useState<string | null>(null);
+
+  const handleSingleFaucetClaim = async () => {
+    setIsClaimingFaucet(true);
+    setFaucetError(null);
+    setClaimingProgress(`Confirm +100 ${selectedStock} in wallet...`);
+    try {
+      await claimFaucet(selectedStock);
+    } catch (err: any) {
+      setFaucetError(err?.message || 'Faucet claim failed.');
+    } finally {
+      setIsClaimingFaucet(false);
+      setClaimingProgress(null);
+    }
+  };
+
+  const handleBatchFaucetClaim = async () => {
+    const syms = ['bCOIN', 'bNVDA', 'bAAPL', 'bTSLA'];
+    setIsClaimingFaucet(true);
+    setFaucetError(null);
+    try {
+      for (let i = 0; i < syms.length; i++) {
+        setClaimingProgress(`Claiming ${syms[i]} (${i + 1}/4) in wallet...`);
+        await claimFaucet(syms[i]);
+      }
+    } catch (err: any) {
+      setFaucetError(err?.message || 'Starter pack interrupted or cancelled.');
+    } finally {
+      setIsClaimingFaucet(false);
+      setClaimingProgress(null);
+    }
+  };
 
   const navLinks = [
     { label: 'Trade / Swap', href: '/', icon: ArrowRightLeft },
@@ -240,9 +275,29 @@ export function Header() {
 
             {/* Faucet Notification */}
             {faucetSuccessMsg && (
-              <div className="p-3 bg-emerald-950/60 border border-emerald-800 rounded-xl text-xs text-emerald-300 flex items-center space-x-2 animate-fadeIn">
-                <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>{faucetSuccessMsg}</span>
+              <div className="p-3 bg-emerald-950/60 border border-emerald-800 rounded-xl text-xs text-emerald-300 flex items-center justify-between gap-2 animate-fadeIn">
+                <div className="flex items-center space-x-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>{faucetSuccessMsg}</span>
+                </div>
+                {faucetTxHash && (
+                  <a
+                    href={`https://sepolia.basescan.org/tx/${faucetTxHash}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center space-x-1 underline hover:text-white shrink-0"
+                  >
+                    <span>BaseScan</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
+              </div>
+            )}
+
+            {faucetError && (
+              <div className="p-3 bg-red-950/60 border border-red-800 rounded-xl text-xs text-red-300 flex items-center space-x-2 animate-fadeIn">
+                <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                <span>{faucetError}</span>
               </div>
             )}
 
@@ -288,23 +343,26 @@ export function Header() {
             {/* Claim Action */}
             <div className="pt-2 space-y-2">
               <button
-                onClick={() => claimFaucet(selectedStock, 100)}
-                className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-xs transition-all shadow-lg shadow-emerald-900/30 flex items-center justify-center space-x-2"
+                disabled={!isConnected || isClaimingFaucet}
+                onClick={handleSingleFaucetClaim}
+                className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-surface-hover disabled:text-gray-500 text-white rounded-xl font-bold text-xs transition-all shadow-lg shadow-emerald-900/30 flex items-center justify-center space-x-2"
               >
                 <Droplets className="w-4 h-4" />
-                <span>Claim +100 {selectedStock} Now</span>
+                <span>
+                  {!isConnected
+                    ? 'Connect Wallet to Claim On-Chain'
+                    : claimingProgress
+                    ? claimingProgress
+                    : `Claim +100 ${selectedStock} On-Chain`}
+                </span>
               </button>
 
               <button
-                onClick={() => {
-                  claimFaucet('bCOIN', 100);
-                  claimFaucet('bNVDA', 50);
-                  claimFaucet('bAAPL', 50);
-                  claimFaucet('bTSLA', 50);
-                }}
-                className="w-full py-2 bg-surface hover:bg-surface-hover border border-border text-gray-300 rounded-xl font-semibold text-xs transition-colors"
+                disabled={!isConnected || isClaimingFaucet}
+                onClick={handleBatchFaucetClaim}
+                className="w-full py-2 bg-surface hover:bg-surface-hover disabled:text-gray-500 border border-border text-gray-300 rounded-xl font-semibold text-xs transition-colors"
               >
-                Claim Full Starter Bundle (All 4 Stocks)
+                Claim All 4 Testnet Stocks (4 On-Chain Txs)
               </button>
             </div>
           </div>

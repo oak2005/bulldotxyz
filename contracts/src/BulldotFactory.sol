@@ -5,7 +5,7 @@ import {IBulldotFactory} from "./interfaces/IBulldotFactory.sol";
 import {IB20Stock} from "./interfaces/IB20Stock.sol";
 import {IB20Registry} from "./interfaces/IB20Registry.sol";
 import {BulldotToken} from "./BulldotToken.sol";
-import {BulldotBondingCurve} from "./BulldotBondingCurve.sol";
+import {BulldotCurveDeployer} from "./BulldotCurveDeployer.sol";
 import {BulldotFeeVault} from "./BulldotFeeVault.sol";
 import {PoolKey, PoolId, PoolIdLibrary, IPoolManager, IPositionManager} from "./interfaces/IUniswapV4Minimal.sol";
 
@@ -51,6 +51,7 @@ contract BulldotFactory is IBulldotFactory {
     address public override owner;
     address public immutable override poolManager;
     address public immutable override positionManager;
+    address public immutable curveDeployer;
     address public override protocolFeeRecipient;
     uint16 public override protocolFeeBps;
     address public override feeVault;
@@ -89,13 +90,15 @@ contract BulldotFactory is IBulldotFactory {
         address _protocolFeeRecipient,
         address _feeVault,
         address _b20Registry,
+        address _curveDeployer,
         address[] memory _initialVerifiedStocks
     ) {
-        if (_poolManager == address(0)) revert ZeroAddress();
+        if (_poolManager == address(0) || _curveDeployer == address(0)) revert ZeroAddress();
 
         owner = msg.sender;
         poolManager = _poolManager;
         positionManager = _positionManager;
+        curveDeployer = _curveDeployer;
 
         // Testnet Treasury Fee Configuration: 0.1% hard-capped fee goes to 0xc96147c68ca8e153e70B3bC4745b8d974bDd212A for testnet only
         if (block.chainid == 84532 || _protocolFeeRecipient == TESTNET_TREASURY_RECIPIENT) {
@@ -156,7 +159,7 @@ contract BulldotFactory is IBulldotFactory {
         if (!pullSuccess) revert TransferFailed();
 
         // 3. Deploy fixed-supply BulldotToken (1 Billion supply minted 100% to this factory)
-        BulldotToken token = new BulldotToken(params.name, params.symbol, address(this));
+        BulldotToken token = _deployToken(params.name, params.symbol);
         tokenAddr = address(token);
         allLaunchedTokens.push(tokenAddr);
         isOfficialLaunch[tokenAddr] = true;
@@ -279,7 +282,7 @@ contract BulldotFactory is IBulldotFactory {
         if (params.maxWalletBps > 10_000) revert InvalidMaxWallet();
 
         // 2. Deploy BulldotToken with supply minted to factory for immediate handoff
-        BulldotToken token = new BulldotToken(params.name, params.symbol, address(this));
+        BulldotToken token = _deployToken(params.name, params.symbol);
         tokenAddr = address(token);
         allLaunchedTokens.push(tokenAddr);
         isOfficialLaunch[tokenAddr] = true;
@@ -292,22 +295,23 @@ contract BulldotFactory is IBulldotFactory {
         // 4. Canonical target: 50 canonical shares
         uint256 targetShares = 50 * 1e18;
 
-        // 5. Deploy BulldotBondingCurve with FeeVault integration & anti-sniper option
-        BulldotBondingCurve curve = new BulldotBondingCurve(
-            tokenAddr,
-            params.b20Stock,
-            msg.sender,
-            params.feeRecipient,
-            protocolFeeRecipient,
-            feeVault,
-            params.creatorFeeBps,
-            protocolFeeBps,
-            targetShares,
-            params.maxWalletBps,
-            poolManager,
-            positionManager
+        // 5. Deploy BulldotBondingCurve via stateless deployer helper
+        curveAddr = BulldotCurveDeployer(curveDeployer).deployCurve(
+            BulldotCurveDeployer.CurveParams({
+                token: tokenAddr,
+                b20Stock: params.b20Stock,
+                creator: msg.sender,
+                feeRecipient: params.feeRecipient,
+                protocolFeeRecipient: protocolFeeRecipient,
+                feeVault: feeVault,
+                creatorFeeBps: params.creatorFeeBps,
+                protocolFeeBps: protocolFeeBps,
+                targetShares: targetShares,
+                maxWalletBps: params.maxWalletBps,
+                poolManager: poolManager,
+                positionManager: positionManager
+            })
         );
-        curveAddr = address(curve);
         isDeployedCurve[curveAddr] = true;
         tokenToCurve[tokenAddr] = curveAddr;
 
@@ -326,6 +330,10 @@ contract BulldotFactory is IBulldotFactory {
             targetShares,
             params.maxWalletBps
         );
+    }
+
+    function _deployToken(string memory name, string memory symbol) internal returns (BulldotToken) {
+        return new BulldotToken(name, symbol, address(this));
     }
 
     function calculateSqrtPriceX96(uint256 amount0, uint256 amount1) public pure returns (uint160) {

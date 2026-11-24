@@ -3,6 +3,7 @@ pragma solidity 0.8.26;
 
 import {Test, console2} from "forge-std/Test.sol";
 import {BulldotFactory} from "../src/BulldotFactory.sol";
+import {BulldotCurveDeployer} from "../src/BulldotCurveDeployer.sol";
 import {BulldotBondingCurve} from "../src/BulldotBondingCurve.sol";
 import {BulldotToken} from "../src/BulldotToken.sol";
 import {BulldotFeeVault} from "../src/BulldotFeeVault.sol";
@@ -38,6 +39,7 @@ contract BaseSepoliaForkTest is Test {
 
         bCOIN = new MockB20Stock("Coinbase Tokenized Stock", "bCOIN");
         feeVault = new BulldotFeeVault();
+        BulldotCurveDeployer curveDeployer = new BulldotCurveDeployer();
 
         address[] memory initialStocks = new address[](1);
         initialStocks[0] = address(bCOIN);
@@ -48,6 +50,7 @@ contract BaseSepoliaForkTest is Test {
             owner,
             address(feeVault),
             address(0),
+            address(curveDeployer),
             initialStocks
         );
 
