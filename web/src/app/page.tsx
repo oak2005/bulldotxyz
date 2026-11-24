@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { VERIFIED_B20_STOCKS, B20StockMetadata } from '../config/stocks';
 import { PriceChart } from '../components/PriceChart';
 import { LiquidityViewer } from '../components/LiquidityViewer';
@@ -16,76 +17,65 @@ import {
   ArrowRightLeft,
   Flame,
   Rocket,
-  Info,
+  Pause,
+  Wallet,
 } from 'lucide-react';
-import { useAccount, useChainId } from 'wagmi';
+import { useAccount, useChainId, useSwitchChain } from 'wagmi';
+import { baseSepolia } from 'wagmi/chains';
+import { useProtocol, TokenPair } from '../context/ProtocolContext';
 
-interface TokenPair {
-  name: string;
-  symbol: string;
-  pairedStockSymbol: string;
-  isGraduated: boolean;
-  ratePerStock: number;
-  stockPriceUsd: number;
-  b20Reserve: number;
-  tokenReserve: number;
-  creatorFeeBps: number;
-}
-
-const SUPPORTED_COMMUNITY_TOKENS: TokenPair[] = [
-  {
-    name: 'Bull Protocol',
-    symbol: 'BULL',
-    pairedStockSymbol: 'bCOIN',
-    isGraduated: true,
-    ratePerStock: 142857, // 1 bCOIN = 142,857 BULL
-    stockPriceUsd: 312.50,
-    b20Reserve: 50.00,
-    tokenReserve: 329375000,
-    creatorFeeBps: 100, // 1.0%
-  },
-  {
-    name: 'Nvidia Meme Moon',
-    symbol: 'NVMOON',
-    pairedStockSymbol: 'bNVDA',
-    isGraduated: true,
-    ratePerStock: 70323,
-    stockPriceUsd: 142.20,
-    b20Reserve: 50.00,
-    tokenReserve: 329375000,
-    creatorFeeBps: 150,
-  },
-  {
-    name: 'Apple Autonomous',
-    symbol: 'APPL',
-    pairedStockSymbol: 'bAAPL',
-    isGraduated: true,
-    ratePerStock: 44280,
-    stockPriceUsd: 225.80,
-    b20Reserve: 25.00,
-    tokenReserve: 1000000000,
-    creatorFeeBps: 100,
-  },
-  {
-    name: 'Tesla Cybertruck Club',
-    symbol: 'CYBR',
-    pairedStockSymbol: 'bTSLA',
-    isGraduated: false, // Bonding curve
-    ratePerStock: 277777,
-    stockPriceUsd: 215.00,
-    b20Reserve: 16.00,
-    tokenReserve: 550000000,
-    creatorFeeBps: 200,
-  },
-];
-
-export default function SwapPage() {
+function SwapContent() {
   const { isConnected, address } = useAccount();
   const chainId = useChainId();
+  const { switchChain } = useSwitchChain();
+  const searchParams = useSearchParams();
+
+  const {
+    isMainnet,
+    isSepolia,
+    isMainnetPaused,
+    stockBalances,
+    tokenBalances,
+    communityTokens,
+    executeApproval,
+    executeSwap,
+    setIsFaucetOpen,
+  } = useProtocol();
 
   // Active pair selection
-  const [activeToken, setActiveToken] = useState<TokenPair>(SUPPORTED_COMMUNITY_TOKENS[0]);
-  const activeStock = VERIFIED_B20_STOCKS.find((s) => s.symbol === activeToken.pairedStockSymbol) || VERIFIED_B20_STOCKS[0];
+  const requestedPair = searchParams.get('pair');
+  const [activeToken, setActiveToken] = useState<TokenPair>(() => {
+    if (requestedPair) {
+      const match = communityTokens.find(
+        (t) => t.symbol.toUpperCase() === requestedPair.toUpperCase()
+      );
+      if (match) return match;
+    }
+    return communityTokens[0];
+  });
+
+  // Keep activeToken in sync if communityTokens updates
+  useEffect(() => {
+    if (requestedPair) {
+      const match = communityTokens.find(
+        (t) => t.symbol.toUpperCase() === requestedPair.toUpperCase()
+      );
+      if (match) {
+        setActiveToken(match);
+        return;
+      }
+    }
+    const currentStillExists = communityTokens.find((t) => t.symbol === activeToken.symbol);
+    if (!currentStillExists && communityTokens.length > 0) {
+      setActiveToken(communityTokens[0]);
+    } else if (currentStillExists) {
+      setActiveToken(currentStillExists);
+    }
+  }, [communityTokens, requestedPair]);
+
+  const activeStock =
+    VERIFIED_B20_STOCKS.find((s) => s.symbol === activeToken.pairedStockSymbol) ||
+    VERIFIED_B20_STOCKS[0];
 
   const [activeTab, setActiveTab] = useState<'SWAP' | 'LIQUIDITY'>('SWAP');
   const [fromAmount, setFromAmount] = useState('1');
@@ -97,10 +87,17 @@ export default function SwapPage() {
   // Execution states
   const [txState, setTxState] = useState<'IDLE' | 'APPROVING' | 'SWAPPING' | 'CONFIRMED'>('IDLE');
   const [lastTxHash, setLastTxHash] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const mockMultiplier = 1.0; // 1 Token = 1 Share
   const parsedFrom = parseFloat(fromAmount) || 0;
   const effectiveSlippage = customSlippage ? parseFloat(customSlippage) || 0.5 : parseFloat(slippage);
+
+  // Balances
+  const stockBalance = stockBalances[activeStock.symbol] || 0;
+  const tokenBalance = tokenBalances[activeToken.symbol] || 0;
+  const userPayingBalance = isTokenToStock ? tokenBalance : stockBalance;
+  const userReceivingBalance = isTokenToStock ? stockBalance : tokenBalance;
 
   // Quote calculations
   const rawToAmount = isTokenToStock
@@ -117,35 +114,55 @@ export default function SwapPage() {
 
   // Price impact calculation based on trade size relative to pool depth
   const tradeSizeInB20 = isTokenToStock ? rawToAmount : parsedFrom;
-  const priceImpact = activeToken.b20Reserve > 0
-    ? Math.min(25.0, ((tradeSizeInB20 / (activeToken.b20Reserve + tradeSizeInB20)) * 100)).toFixed(2)
-    : '0.10';
+  const priceImpact =
+    activeToken.b20Reserve > 0
+      ? Math.min(25.0, (tradeSizeInB20 / (activeToken.b20Reserve + tradeSizeInB20)) * 100).toFixed(2)
+      : '0.10';
 
   const numericPriceImpact = parseFloat(priceImpact);
 
   // Fees
   const creatorFeePercent = activeToken.creatorFeeBps / 100;
-  const poolFeePercent = 0.30; // 0.30% Uniswap v4 standard
-  const estimatedFeeB20 = (tradeSizeInB20 * (creatorFeePercent + poolFeePercent) / 100).toFixed(4);
+  const poolFeePercent = 0.3; // 0.30% Uniswap v4 standard
+  const estimatedFeeB20 = ((tradeSizeInB20 * (creatorFeePercent + poolFeePercent)) / 100).toFixed(4);
 
   // Token USD equivalent
   const tokenPriceUsd = (activeToken.stockPriceUsd / activeToken.ratePerStock).toFixed(6);
 
-  const handleSwap = () => {
-    if (parsedFrom <= 0) return;
-    setTxState('APPROVING');
-
-    setTimeout(() => {
-      setTxState('SWAPPING');
-      setTimeout(() => {
-        setTxState('CONFIRMED');
-        setLastTxHash('0x3a9f8b2c1e4d7a6e5b8c9d0f1e2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a');
-        setTimeout(() => setTxState('IDLE'), 6000);
-      }, 1500);
-    }, 1200);
+  const handleMaxClick = () => {
+    if (userPayingBalance > 0) {
+      setFromAmount(userPayingBalance.toString());
+    }
   };
 
-  const isSepolia = chainId === 84532;
+  const handleSwap = async () => {
+    if (parsedFrom <= 0 || parsedFrom > userPayingBalance) return;
+    setErrorMessage(null);
+
+    try {
+      setTxState('APPROVING');
+      await executeApproval(isTokenToStock ? activeToken.symbol : activeStock.symbol, parsedFrom);
+
+      setTxState('SWAPPING');
+      const hash = await executeSwap({
+        fromSymbol: isTokenToStock ? activeToken.symbol : activeStock.symbol,
+        toSymbol: isTokenToStock ? activeStock.symbol : activeToken.symbol,
+        fromAmount: parsedFrom,
+        toAmount: rawToAmount,
+        tokenSymbol: activeToken.symbol,
+        isTokenToStock,
+      });
+
+      setLastTxHash(hash);
+      setTxState('CONFIRMED');
+      setTimeout(() => setTxState('IDLE'), 8000);
+    } catch (err: any) {
+      console.error('Swap failed:', err);
+      setErrorMessage(err?.message || 'Transaction was rejected or failed.');
+      setTxState('IDLE');
+    }
+  };
+
   const explorerUrl = isSepolia ? 'https://sepolia.basescan.org' : 'https://basescan.org';
 
   return (
@@ -175,11 +192,11 @@ export default function SwapPage() {
           <div className="bg-surface border border-border rounded-xl p-3 flex items-center justify-between">
             <span className="text-xs text-gray-400 font-medium">Select Community Token:</span>
             <div className="flex items-center space-x-1.5 overflow-x-auto">
-              {SUPPORTED_COMMUNITY_TOKENS.map((token) => (
+              {communityTokens.map((token) => (
                 <button
                   key={token.symbol}
                   onClick={() => setActiveToken(token)}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
                     activeToken.symbol === token.symbol
                       ? 'bg-primary text-white shadow-md'
                       : 'bg-background text-gray-400 hover:text-white border border-border'
@@ -296,7 +313,28 @@ export default function SwapPage() {
               <div className="bg-background border border-border/80 rounded-xl p-3.5">
                 <div className="flex justify-between items-center text-xs text-gray-400 mb-1.5">
                   <span>You Pay</span>
-                  <span>Balance: 12.450 {isTokenToStock ? activeToken.symbol : activeStock.symbol}</span>
+                  <div className="flex items-center space-x-1.5">
+                    <span>
+                      Balance: {userPayingBalance.toLocaleString(undefined, { maximumFractionDigits: isTokenToStock ? 0 : 3 })}{' '}
+                      {isTokenToStock ? activeToken.symbol : activeStock.symbol}
+                    </span>
+                    {userPayingBalance > 0 && (
+                      <button
+                        onClick={handleMaxClick}
+                        className="text-[10px] bg-primary/20 hover:bg-primary/30 text-primary px-1.5 py-0.5 rounded font-bold"
+                      >
+                        MAX
+                      </button>
+                    )}
+                    {!isTokenToStock && isSepolia && (
+                      <button
+                        onClick={() => setIsFaucetOpen(true)}
+                        className="text-[10px] text-emerald-400 hover:text-emerald-300 font-semibold underline"
+                      >
+                        +Faucet
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <div className="flex items-center justify-between">
@@ -349,7 +387,10 @@ export default function SwapPage() {
               <div className="bg-background border border-border/80 rounded-xl p-3.5 mt-1">
                 <div className="flex justify-between items-center text-xs text-gray-400 mb-1.5">
                   <span>You Receive (Estimated)</span>
-                  <span>Balance: 0.00</span>
+                  <span>
+                    Balance: {userReceivingBalance.toLocaleString(undefined, { maximumFractionDigits: isTokenToStock ? 3 : 0 })}{' '}
+                    {isTokenToStock ? activeStock.symbol : activeToken.symbol}
+                  </span>
                 </div>
 
                 <div className="flex items-center justify-between">
@@ -428,7 +469,7 @@ export default function SwapPage() {
 
               {/* Transaction Confirmed Card */}
               {txState === 'CONFIRMED' && lastTxHash && (
-                <div className="p-3 bg-green-950/40 border border-green-800 rounded-xl text-xs text-green-300 flex items-center justify-between">
+                <div className="p-3 bg-green-950/40 border border-green-800 rounded-xl text-xs text-green-300 flex items-center justify-between animate-fadeIn">
                   <div className="flex items-center space-x-2">
                     <CheckCircle2 className="w-4 h-4 text-green-400" />
                     <span>Swap confirmed on Base!</span>
@@ -445,6 +486,14 @@ export default function SwapPage() {
                 </div>
               )}
 
+              {/* Error Message */}
+              {errorMessage && (
+                <div className="p-3 bg-red-950/40 border border-red-800 rounded-xl text-xs text-red-300 flex items-center space-x-2 animate-fadeIn">
+                  <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                  <span>{errorMessage}</span>
+                </div>
+              )}
+
               {/* Action Button */}
               <div>
                 {!isConnected ? (
@@ -454,6 +503,32 @@ export default function SwapPage() {
                   >
                     Connect Wallet to Trade
                   </button>
+                ) : isMainnet && isMainnetPaused ? (
+                  <button
+                    onClick={() => switchChain?.({ chainId: baseSepolia.id })}
+                    className="w-full py-3.5 bg-amber-900/60 hover:bg-amber-800/80 border border-amber-700 text-amber-200 rounded-xl font-bold transition-all text-xs flex items-center justify-center space-x-2"
+                  >
+                    <Pause className="w-4 h-4 text-amber-400" />
+                    <span>Mainnet Paused — Switch to Base Sepolia Testnet</span>
+                  </button>
+                ) : parsedFrom > userPayingBalance ? (
+                  <div className="space-y-2">
+                    <button
+                      disabled
+                      className="w-full py-3.5 bg-surface-hover border border-border text-gray-500 rounded-xl font-bold cursor-not-allowed text-xs"
+                    >
+                      Insufficient {isTokenToStock ? activeToken.symbol : activeStock.symbol} Balance
+                    </button>
+                    {!isTokenToStock && isSepolia && (
+                      <button
+                        onClick={() => setIsFaucetOpen(true)}
+                        className="w-full py-2 bg-emerald-950/60 hover:bg-emerald-900/60 border border-emerald-800 text-emerald-300 rounded-xl font-semibold text-xs transition-colors flex items-center justify-center space-x-1.5"
+                      >
+                        <Droplets className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Claim Free {activeStock.symbol} from Faucet</span>
+                      </button>
+                    )}
+                  </div>
                 ) : (
                   <button
                     disabled={parsedFrom <= 0 || txState !== 'IDLE'}
@@ -463,13 +538,13 @@ export default function SwapPage() {
                     {txState === 'APPROVING' && (
                       <>
                         <RefreshCw className="w-4 h-4 animate-spin" />
-                        <span>Approving {isTokenToStock ? activeToken.symbol : activeStock.symbol}...</span>
+                        <span>Confirming Approval in Wallet...</span>
                       </>
                     )}
                     {txState === 'SWAPPING' && (
                       <>
                         <RefreshCw className="w-4 h-4 animate-spin" />
-                        <span>Executing Swap on Uniswap v4...</span>
+                        <span>Confirming Swap in Wallet...</span>
                       </>
                     )}
                     {txState === 'IDLE' && <span>Swap {activeStock.symbol} / ${activeToken.symbol}</span>}
@@ -493,5 +568,13 @@ export default function SwapPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function SwapPage() {
+  return (
+    <Suspense fallback={<div className="text-center py-12 text-gray-400">Loading exchange...</div>}>
+      <SwapContent />
+    </Suspense>
   );
 }

@@ -1,14 +1,41 @@
 'use client';
 
 import React, { useState } from 'react';
+import Link from 'next/link';
 import { VERIFIED_B20_STOCKS } from '../../config/stocks';
-import { ShieldCheck, Rocket, Flame, Layers, AlertTriangle, CheckCircle2, Lock, Info, ExternalLink } from 'lucide-react';
-import { useAccount, useChainId } from 'wagmi';
+import {
+  ShieldCheck,
+  Rocket,
+  Flame,
+  Layers,
+  AlertTriangle,
+  CheckCircle2,
+  Lock,
+  Info,
+  ExternalLink,
+  Pause,
+  Droplets,
+  RefreshCw,
+  ArrowRight,
+} from 'lucide-react';
+import { useAccount, useChainId, useSwitchChain } from 'wagmi';
+import { baseSepolia } from 'wagmi/chains';
+import { useProtocol, TokenPair } from '../../context/ProtocolContext';
 
 export default function LaunchPage() {
   const { isConnected, address } = useAccount();
   const chainId = useChainId();
-  const isSepolia = chainId === 84532;
+  const { switchChain } = useSwitchChain();
+
+  const {
+    isMainnet,
+    isSepolia,
+    isMainnetPaused,
+    stockBalances,
+    executeLaunch,
+    setIsFaucetOpen,
+  } = useProtocol();
+
   const explorerUrl = isSepolia ? 'https://sepolia.basescan.org' : 'https://basescan.org';
 
   const [mode, setMode] = useState<'CURVE' | 'INSTANT'>('CURVE');
@@ -22,13 +49,41 @@ export default function LaunchPage() {
   const [antiDumpMode, setAntiDumpMode] = useState<'2%' | '1%' | 'OFF'>('2%');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [deployedTx, setDeployedTx] = useState<string | null>(null);
+  const [deployedToken, setDeployedToken] = useState<TokenPair | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const handleLaunch = () => {
+  const userStockBalance = stockBalances[selectedStock.symbol] || 0;
+  const parsedDeposit = parseFloat(initialDeposit) || 0;
+  const hasEnoughDeposit = mode !== 'INSTANT' || userStockBalance >= parsedDeposit;
+
+  const handleLaunch = async () => {
+    if (!tokenName || !tokenSymbol) return;
+    if (mode === 'INSTANT' && !hasEnoughDeposit) return;
+
     setIsSubmitting(true);
-    setTimeout(() => {
+    setErrorMessage(null);
+
+    try {
+      const result = await executeLaunch({
+        name: tokenName,
+        symbol: tokenSymbol,
+        stockSymbol: selectedStock.symbol,
+        mode,
+        initialDeposit: mode === 'INSTANT' ? parsedDeposit : 0,
+        creatorFeeBps: Math.round(creatorFee * 100),
+        antiDumpMode,
+        feeDestination,
+        customRecipient: feeDestination === 'CUSTOM' ? customRecipient : undefined,
+      });
+
+      setDeployedTx(result.txHash);
+      setDeployedToken(result.token);
+    } catch (err: any) {
+      console.error('Launch failed:', err);
+      setErrorMessage(err?.message || 'Transaction was rejected or failed.');
+    } finally {
       setIsSubmitting(false);
-      setDeployedTx('0x9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b');
-    }, 1500);
+    }
   };
 
   return (
@@ -41,11 +96,12 @@ export default function LaunchPage() {
         </p>
       </div>
 
-      {deployedTx && (
-        <div className="p-4 bg-green-950/40 border border-green-800 rounded-2xl text-xs text-green-300 space-y-2 animate-fadeIn">
+      {/* Deployment Success Card */}
+      {deployedTx && deployedToken && (
+        <div className="p-5 bg-green-950/40 border border-green-800 rounded-2xl text-xs text-green-300 space-y-3 animate-fadeIn">
           <div className="flex items-center justify-between">
             <span className="font-bold text-sm text-green-400 flex items-center gap-1.5">
-              <CheckCircle2 className="w-4 h-4" />
+              <CheckCircle2 className="w-5 h-5" />
               Token Successfully Deployed!
             </span>
             <a
@@ -58,9 +114,35 @@ export default function LaunchPage() {
               <ExternalLink className="w-3.5 h-3.5" />
             </a>
           </div>
-          <p className="text-green-300/80">
-            ${tokenSymbol || 'TOKEN'} is deployed via BulldotFactory. Permanent liquidity is locked to 0x...dEaD. Verification badge has been granted.
+
+          <p className="text-green-300/80 leading-relaxed">
+            <strong>${deployedToken.symbol}</strong> ({deployedToken.name}) is deployed via BulldotFactory and paired with{' '}
+            <strong>{deployedToken.pairedStockSymbol}</strong>. Permanent liquidity is locked to 0x...dEaD forever. Official verification badge granted.
           </p>
+
+          <div className="pt-2 flex items-center space-x-3">
+            <Link
+              href={`/?pair=${deployedToken.symbol}`}
+              className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-xl font-bold flex items-center space-x-1.5 transition-all shadow-md"
+            >
+              <span>Trade ${deployedToken.symbol} Now</span>
+              <ArrowRight className="w-4 h-4" />
+            </Link>
+            <Link
+              href="/explore"
+              className="px-4 py-2 bg-surface hover:bg-surface-hover border border-border text-gray-300 rounded-xl font-semibold transition-all"
+            >
+              <span>View in Explore Pools</span>
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {/* Error Message */}
+      {errorMessage && (
+        <div className="p-4 bg-red-950/40 border border-red-800 rounded-xl text-xs text-red-300 flex items-center space-x-2 animate-fadeIn">
+          <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+          <span>{errorMessage}</span>
         </div>
       )}
 
@@ -171,18 +253,40 @@ export default function LaunchPage() {
 
         {/* Instant Pool Seed Amount (Conditional) */}
         {mode === 'INSTANT' && (
-          <div className="p-4 bg-background border border-warning/30 rounded-xl space-y-2">
-            <span className="text-sm font-semibold text-warning flex items-center gap-1.5">
-              <Flame className="w-4 h-4" />
-              Initial {selectedStock.symbol} Liquidity Deposit
-            </span>
+          <div className="p-4 bg-background border border-warning/30 rounded-xl space-y-3">
+            <div className="flex justify-between items-center">
+              <span className="text-sm font-semibold text-warning flex items-center gap-1.5">
+                <Flame className="w-4 h-4" />
+                Initial {selectedStock.symbol} Liquidity Deposit
+              </span>
+              <div className="flex items-center space-x-1.5 text-xs text-gray-400">
+                <span>Balance: {userStockBalance.toFixed(2)} {selectedStock.symbol}</span>
+                {isSepolia && (
+                  <button
+                    onClick={() => setIsFaucetOpen(true)}
+                    className="text-emerald-400 underline hover:text-emerald-300 font-semibold"
+                  >
+                    +Faucet
+                  </button>
+                )}
+              </div>
+            </div>
+
             <input
               type="number"
               value={initialDeposit}
               onChange={(e) => setInitialDeposit(e.target.value)}
-              placeholder="e.g. 10"
+              placeholder="e.g. 5"
               className="w-full bg-surface border border-border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none"
             />
+
+            {!hasEnoughDeposit && (
+              <p className="text-xs text-red-400 flex items-center gap-1">
+                <AlertTriangle className="w-3.5 h-3.5" />
+                Insufficient {selectedStock.symbol} balance. Claim more from the Stock Faucet above.
+              </p>
+            )}
+
             <p className="text-xs text-gray-400">
               This {selectedStock.symbol} will be paired with 1,000,000,000 newly minted {tokenSymbol || 'tokens'} in Uniswap v4 and permanently burned to 0x...dEaD.
             </p>
@@ -334,6 +438,21 @@ export default function LaunchPage() {
             >
               Connect Wallet to Deploy
             </button>
+          ) : isMainnet && isMainnetPaused ? (
+            <button
+              onClick={() => switchChain?.({ chainId: baseSepolia.id })}
+              className="w-full py-4 bg-amber-900/60 hover:bg-amber-800/80 border border-amber-700 text-amber-200 rounded-xl font-bold transition-all text-xs flex items-center justify-center space-x-2"
+            >
+              <Pause className="w-4 h-4 text-amber-400" />
+              <span>Mainnet Paused — Switch to Base Sepolia Testnet</span>
+            </button>
+          ) : mode === 'INSTANT' && !hasEnoughDeposit ? (
+            <button
+              disabled
+              className="w-full py-4 bg-surface-hover border border-border text-gray-500 rounded-xl font-bold cursor-not-allowed text-xs"
+            >
+              Insufficient {selectedStock.symbol} Balance for Deposit
+            </button>
           ) : (
             <button
               disabled={isSubmitting || !tokenName || !tokenSymbol}
@@ -341,7 +460,10 @@ export default function LaunchPage() {
               className="w-full py-4 bg-primary hover:bg-primary-hover disabled:bg-surface-hover disabled:text-gray-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-primary/25 text-xs flex items-center justify-center space-x-2"
             >
               {isSubmitting ? (
-                <span>Deploying to {isSepolia ? 'Base Sepolia' : 'Base Mainnet'}...</span>
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" />
+                  <span>Confirming Deployment in Wallet...</span>
+                </>
               ) : (
                 <span>Launch {tokenSymbol ? `$${tokenSymbol}` : 'Token'} Now</span>
               )}

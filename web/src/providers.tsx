@@ -6,6 +6,7 @@ import { getDefaultConfig, RainbowKitProvider, darkTheme } from '@rainbow-me/rai
 import { WagmiProvider, http } from 'wagmi';
 import { base, baseSepolia } from 'wagmi/chains';
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
+import { ProtocolProvider } from './context/ProtocolContext';
 
 const config = getDefaultConfig({
   appName: 'bulldotxyz',
@@ -41,10 +42,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
             fontStack: 'system',
           })}
         >
-          {children}
+          <ProtocolProvider>
+            {children}
+          </ProtocolProvider>
         </RainbowKitProvider>
       </QueryClientProvider>
     </WagmiProvider>
   );
 }
-

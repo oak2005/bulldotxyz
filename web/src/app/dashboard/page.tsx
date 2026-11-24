@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useState } from 'react';
-import { useAccount, useChainId } from 'wagmi';
+import { useAccount, useChainId, useSwitchChain } from 'wagmi';
+import { baseSepolia } from 'wagmi/chains';
 import {
   ShieldCheck,
   Coins,
@@ -14,65 +15,28 @@ import {
   Layers,
   RefreshCw,
   Users,
+  AlertTriangle,
+  Pause,
+  Lock,
 } from 'lucide-react';
-import { VERIFIED_B20_STOCKS } from '../../config/stocks';
-
-interface ManagedToken {
-  name: string;
-  symbol: string;
-  stockSymbol: string;
-  stockPriceUsd: number;
-  multiplier: number;
-  totalRawCollected: number;
-  claimableRaw: number;
-  currentRecipient: string;
-  isTreasuryRedirected: boolean;
-  treasuryBurnedShares: number;
-}
-
-const MANAGED_TOKENS: ManagedToken[] = [
-  {
-    name: 'Bull Protocol',
-    symbol: 'BULL',
-    stockSymbol: 'bCOIN',
-    stockPriceUsd: 312.50,
-    multiplier: 1.0,
-    totalRawCollected: 1.85,
-    claimableRaw: 0.85,
-    currentRecipient: '0x000000000000000000000000000000000000dEaD',
-    isTreasuryRedirected: true,
-    treasuryBurnedShares: 1.00,
-  },
-  {
-    name: 'Nvidia Meme Moon',
-    symbol: 'NVMOON',
-    stockSymbol: 'bNVDA',
-    stockPriceUsd: 142.20,
-    multiplier: 1.0,
-    totalRawCollected: 3.40,
-    claimableRaw: 1.20,
-    currentRecipient: '0x000000000000000000000000000000000000dEaD',
-    isTreasuryRedirected: true,
-    treasuryBurnedShares: 2.20,
-  },
-  {
-    name: 'Treasury Share Token',
-    symbol: 'TST',
-    stockSymbol: 'bCOIN',
-    stockPriceUsd: 312.50,
-    multiplier: 1.0,
-    totalRawCollected: 5.25,
-    claimableRaw: 0.00,
-    currentRecipient: '0x000000000000000000000000000000000000dEaD',
-    isTreasuryRedirected: true,
-    treasuryBurnedShares: 5.25,
-  },
-];
+import { useProtocol, TokenPair } from '../../context/ProtocolContext';
 
 export default function DashboardPage() {
   const { isConnected, address } = useAccount();
   const chainId = useChainId();
-  const isSepolia = chainId === 84532;
+  const { switchChain } = useSwitchChain();
+
+  const {
+    isMainnet,
+    isSepolia,
+    isMainnetPaused,
+    communityTokens,
+    executeClaimFees,
+    executeBurnFeesToTreasury,
+    executeRedirectFees,
+    executeRenounceManagement,
+  } = useProtocol();
+
   const explorerUrl = isSepolia ? 'https://sepolia.basescan.org' : 'https://basescan.org';
 
   const [activeTab, setActiveTab] = useState<'METRICS' | 'REDIRECT' | 'COMMUNITY'>('METRICS');
@@ -80,30 +44,75 @@ export default function DashboardPage() {
   const [newRecipient, setNewRecipient] = useState('');
   const [isClaiming, setIsClaiming] = useState(false);
   const [isRedirecting, setIsRedirecting] = useState(false);
+  const [isRenouncing, setIsRenouncing] = useState(false);
   const [lastTxHash, setLastTxHash] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const currentToken = MANAGED_TOKENS[selectedTokenIndex];
+  const currentToken: TokenPair = communityTokens[selectedTokenIndex] || communityTokens[0];
+  const claimable = currentToken?.claimableRawFees || 0;
+  const totalCollected = currentToken?.totalCollectedRawFees || 0;
+  const burnedShares = currentToken?.treasuryBurnedShares || 0;
 
-  const handleClaim = () => {
+  const handleClaim = async () => {
+    if (!currentToken || claimable <= 0) return;
     setIsClaiming(true);
-    setTimeout(() => {
+    setErrorMessage(null);
+
+    try {
+      let hash = '';
+      if (currentToken.isTreasuryRedirected) {
+        hash = await executeBurnFeesToTreasury(currentToken.symbol);
+      } else {
+        hash = await executeClaimFees(currentToken.symbol);
+      }
+      setLastTxHash(hash);
+      setTimeout(() => setLastTxHash(null), 8000);
+    } catch (err: any) {
+      console.error('Claim failed:', err);
+      setErrorMessage(err?.message || 'Transaction was rejected or failed.');
+    } finally {
       setIsClaiming(false);
-      setLastTxHash('0x4b7c1d3e5a2f8b9c0d1e4a6f8b2c5d7e9f1a3b5c7d9e1f3a5b7c9d1e3f5a7b9c');
-      setTimeout(() => setLastTxHash(null), 7000);
-    }, 1500);
+    }
   };
 
-  const handleRedirect = () => {
-    if (!newRecipient) return;
+  const handleRedirect = async () => {
+    if (!newRecipient || !currentToken) return;
     setIsRedirecting(true);
-    setTimeout(() => {
-      setIsRedirecting(false);
-      currentToken.currentRecipient = newRecipient;
-      currentToken.isTreasuryRedirected = newRecipient === '0x000000000000000000000000000000000000dEaD';
-      setLastTxHash('0x7e9f1a3b5c7d9e1f3a5b7c9d1e3f5a7b9c4b7c1d3e5a2f8b9c0d1e4a6f8b2c5d');
+    setErrorMessage(null);
+
+    try {
+      const hash = await executeRedirectFees(currentToken.symbol, newRecipient);
+      setLastTxHash(hash);
       setNewRecipient('');
-      setTimeout(() => setLastTxHash(null), 7000);
-    }, 1500);
+      setTimeout(() => setLastTxHash(null), 8000);
+    } catch (err: any) {
+      console.error('Redirect failed:', err);
+      setErrorMessage(err?.message || 'Transaction was rejected or failed.');
+    } finally {
+      setIsRedirecting(false);
+    }
+  };
+
+  const handleRenounce = async () => {
+    if (!currentToken) return;
+    const confirm = window.confirm(
+      `Are you sure you want to permanently renounce manager rights for $${currentToken.symbol}? This will permanently lock fee routing and make treasury burns immutable.`
+    );
+    if (!confirm) return;
+
+    setIsRenouncing(true);
+    setErrorMessage(null);
+
+    try {
+      const hash = await executeRenounceManagement(currentToken.symbol);
+      setLastTxHash(hash);
+      setTimeout(() => setLastTxHash(null), 8000);
+    } catch (err: any) {
+      console.error('Renounce failed:', err);
+      setErrorMessage(err?.message || 'Transaction was rejected or failed.');
+    } finally {
+      setIsRenouncing(false);
+    }
   };
 
   return (
@@ -152,15 +161,15 @@ export default function DashboardPage() {
       </div>
 
       {/* Active Token Selector (Tabs 1 & 2) */}
-      {activeTab !== 'COMMUNITY' && (
+      {activeTab !== 'COMMUNITY' && communityTokens.length > 0 && (
         <div className="bg-surface border border-border rounded-xl p-3 flex items-center justify-between">
           <span className="text-xs text-gray-400 font-medium">Select Managed Token:</span>
-          <div className="flex items-center space-x-2">
-            {MANAGED_TOKENS.map((token, idx) => (
+          <div className="flex items-center space-x-2 overflow-x-auto">
+            {communityTokens.map((token, idx) => (
               <button
                 key={token.symbol}
                 onClick={() => setSelectedTokenIndex(idx)}
-                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all ${
+                className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
                   selectedTokenIndex === idx
                     ? 'bg-primary text-white shadow-md'
                     : 'bg-background text-gray-400 hover:text-white border border-border'
@@ -192,19 +201,27 @@ export default function DashboardPage() {
         </div>
       )}
 
+      {/* Error Message */}
+      {errorMessage && (
+        <div className="p-3 bg-red-950/40 border border-red-800 rounded-xl text-xs text-red-300 flex items-center space-x-2 animate-fadeIn">
+          <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+          <span>{errorMessage}</span>
+        </div>
+      )}
+
       {/* TAB 1: METRICS & CLAIM */}
-      {activeTab === 'METRICS' && (
+      {activeTab === 'METRICS' && currentToken && (
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {/* Card 1: Total Lifetime Collected */}
             <div className="bg-surface border border-border rounded-xl p-5 space-y-2">
               <span className="text-xs text-gray-400 block font-medium">Total Lifetime Fees</span>
               <div className="text-2xl font-bold text-white">
-                {currentToken.totalRawCollected.toFixed(3)} {currentToken.stockSymbol}
+                {totalCollected.toFixed(3)} {currentToken.pairedStockSymbol}
               </div>
               <p className="text-[11px] text-gray-400 flex items-center gap-1">
                 <ShieldCheck className="w-3.5 h-3.5 text-primary" />
-                ~${(currentToken.totalRawCollected * currentToken.stockPriceUsd).toFixed(2)} USD value
+                ~${(totalCollected * currentToken.stockPriceUsd).toFixed(2)} USD value
               </p>
             </div>
 
@@ -218,7 +235,7 @@ export default function DashboardPage() {
                     Coinbase Stock Treasury (Buyback)
                   </span>
                 ) : (
-                  currentToken.currentRecipient
+                  currentToken.feeRecipient || 'Creator Address'
                 )}
               </div>
               <p className="text-[11px] text-success flex items-center gap-1">
@@ -231,35 +248,45 @@ export default function DashboardPage() {
             <div className="bg-surface border border-primary/40 rounded-xl p-5 space-y-3">
               <span className="text-xs text-primary font-semibold block">Available to Claim</span>
               <div className="text-2xl font-extrabold text-white">
-                {currentToken.claimableRaw.toFixed(3)} {currentToken.stockSymbol}
+                {claimable.toFixed(3)} {currentToken.pairedStockSymbol}
               </div>
               <span className="text-[11px] text-gray-400 block">
-                ≈ ${(currentToken.claimableRaw * currentToken.stockPriceUsd).toFixed(2)} USD
+                ≈ ${(claimable * currentToken.stockPriceUsd).toFixed(2)} USD
               </span>
 
-              <button
-                disabled={!isConnected || isClaiming || currentToken.claimableRaw <= 0}
-                onClick={handleClaim}
-                className={`w-full py-2.5 rounded-lg text-xs font-bold transition-colors flex items-center justify-center space-x-1.5 ${
-                  currentToken.isTreasuryRedirected
-                    ? 'bg-amber-600 hover:bg-amber-500 text-white'
-                    : 'bg-primary hover:bg-primary-hover text-white'
-                } disabled:bg-surface-hover disabled:text-gray-500`}
-              >
-                {isClaiming ? (
-                  <>
-                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                    <span>Processing Vault Forward...</span>
-                  </>
-                ) : currentToken.isTreasuryRedirected ? (
-                  <>
-                    <Flame className="w-3.5 h-3.5" />
-                    <span>Burn to Treasury (Permissionless)</span>
-                  </>
-                ) : (
-                  <span>Claim B20 Stock Fees</span>
-                )}
-              </button>
+              {isMainnet && isMainnetPaused ? (
+                <button
+                  onClick={() => switchChain?.({ chainId: baseSepolia.id })}
+                  className="w-full py-2.5 rounded-lg text-xs font-bold bg-amber-900/60 hover:bg-amber-800 text-amber-200 border border-amber-700 flex items-center justify-center space-x-1"
+                >
+                  <Pause className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Mainnet Paused</span>
+                </button>
+              ) : (
+                <button
+                  disabled={!isConnected || isClaiming || claimable <= 0}
+                  onClick={handleClaim}
+                  className={`w-full py-2.5 rounded-lg text-xs font-bold transition-colors flex items-center justify-center space-x-1.5 ${
+                    currentToken.isTreasuryRedirected
+                      ? 'bg-amber-600 hover:bg-amber-500 text-white'
+                      : 'bg-primary hover:bg-primary-hover text-white'
+                  } disabled:bg-surface-hover disabled:text-gray-500`}
+                >
+                  {isClaiming ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Confirming in Wallet...</span>
+                    </>
+                  ) : currentToken.isTreasuryRedirected ? (
+                    <>
+                      <Flame className="w-3.5 h-3.5" />
+                      <span>Burn to Treasury (Permissionless)</span>
+                    </>
+                  ) : (
+                    <span>Claim B20 Stock Fees</span>
+                  )}
+                </button>
+              )}
             </div>
           </div>
 
@@ -274,7 +301,7 @@ export default function DashboardPage() {
       )}
 
       {/* TAB 2: REDIRECTION MANAGER */}
-      {activeTab === 'REDIRECT' && (
+      {activeTab === 'REDIRECT' && currentToken && (
         <div className="bg-surface border border-border rounded-xl p-6 max-w-xl space-y-5">
           <div>
             <h2 className="text-base font-bold text-white">Redirect Creator Fees for ${currentToken.symbol}</h2>
@@ -319,130 +346,116 @@ export default function DashboardPage() {
               </div>
             </div>
 
+            {/* Custom Recipient Input */}
             <div>
-              <span className="text-xs text-gray-400 block mb-1 font-medium">Or Enter Custom Destination Address:</span>
+              <span className="text-xs text-gray-400 block mb-1 font-medium">Or Enter Custom Recipient Address:</span>
               <input
                 type="text"
                 value={newRecipient}
                 onChange={(e) => setNewRecipient(e.target.value)}
-                placeholder="0x... Recipient Address"
-                className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:border-primary font-mono"
+                placeholder="0x... Target Address"
+                className="w-full bg-background border border-border rounded-xl px-4 py-2 text-xs text-white focus:outline-none focus:border-primary font-mono"
               />
             </div>
 
-            <button
-              disabled={!isConnected || !newRecipient || isRedirecting}
-              onClick={handleRedirect}
-              className="w-full py-3.5 bg-primary hover:bg-primary-hover disabled:bg-surface-hover disabled:text-gray-500 text-white rounded-xl text-xs font-bold transition-colors flex items-center justify-center space-x-1.5"
-            >
-              {isRedirecting ? (
-                <>
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                  <span>Updating On-Chain Fee Vault...</span>
-                </>
-              ) : (
-                <span>Confirm Fee Redirection</span>
-              )}
-            </button>
-
-            {/* Renounce Management Option */}
-            <div className="pt-3 border-t border-border/60">
-              <div className="flex items-center justify-between">
-                <div>
-                  <span className="text-xs font-semibold text-gray-300 block">Renounce Fee Management</span>
-                  <span className="text-[11px] text-gray-500">Permanently lock this redirect. Neither creator nor admin can ever divert fees.</span>
-                </div>
+            {/* Action Buttons */}
+            <div className="space-y-2 pt-2">
+              {isMainnet && isMainnetPaused ? (
                 <button
-                  type="button"
-                  disabled={!isConnected || isRedirecting || currentToken.currentRecipient === '0x0000000000000000000000000000000000000000'}
-                  onClick={() => {
-                    setIsRedirecting(true);
-                    setTimeout(() => {
-                      setIsRedirecting(false);
-                      setLastTxHash('0x9a8b7c6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a4b3c2d1e0f9a8b');
-                      setTimeout(() => setLastTxHash(null), 7000);
-                    }, 1500);
-                  }}
-                  className="px-3 py-1.5 border border-red-800/80 bg-red-950/30 hover:bg-red-900/50 text-red-300 text-xs rounded-lg font-medium transition-all"
+                  onClick={() => switchChain?.({ chainId: baseSepolia.id })}
+                  className="w-full py-3 rounded-xl text-xs font-bold bg-amber-900/60 hover:bg-amber-800 text-amber-200 border border-amber-700 flex items-center justify-center space-x-1"
                 >
-                  Renounce
+                  <Pause className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Mainnet Paused — Switch to Base Sepolia Testnet</span>
                 </button>
-              </div>
+              ) : (
+                <>
+                  <button
+                    disabled={!isConnected || isRedirecting || !newRecipient}
+                    onClick={handleRedirect}
+                    className="w-full py-3 bg-primary hover:bg-primary-hover disabled:bg-surface-hover disabled:text-gray-500 text-white rounded-xl font-bold text-xs transition-all flex items-center justify-center space-x-2 shadow-md"
+                  >
+                    {isRedirecting ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Confirming Redirection in Wallet...</span>
+                      </>
+                    ) : (
+                      <span>Update Fee Recipient for ${currentToken.symbol}</span>
+                    )}
+                  </button>
+
+                  <button
+                    disabled={!isConnected || isRenouncing}
+                    onClick={handleRenounce}
+                    className="w-full py-2.5 bg-background hover:bg-surface border border-red-900/50 hover:border-red-700 text-red-400 rounded-xl font-semibold text-xs transition-colors flex items-center justify-center space-x-1.5"
+                    title="Permanently relinquishes creator ability to change the recipient."
+                  >
+                    <Lock className="w-3.5 h-3.5" />
+                    <span>Renounce Manager Rights (Lock Permanently)</span>
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>
       )}
 
-      {/* TAB 3: COMMUNITY STOCK TREASURIES VIEW */}
+      {/* TAB 3: COMMUNITY STOCK TREASURIES */}
       {activeTab === 'COMMUNITY' && (
         <div className="space-y-4">
-          <div className="p-4 bg-background border border-border rounded-xl space-y-1">
-            <h2 className="text-sm font-bold text-white flex items-center gap-1.5">
-              <Building2 className="w-4 h-4 text-primary" />
-              Community Stock Treasuries (Buyback & Equity Dividends)
-            </h2>
-            <p className="text-xs text-gray-400">
-              Community tokens that align with real-world equities by routing 100% of their trading fees to underlying Coinbase stock treasuries.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {MANAGED_TOKENS.filter((t) => t.isTreasuryRedirected).map((token) => (
-              <div
-                key={token.symbol}
-                className="bg-surface border border-border rounded-xl p-5 space-y-3 shadow-md"
-              >
-                <div className="flex justify-between items-start">
-                  <div>
-                    <span className="font-bold text-white text-base">${token.symbol}</span>
-                    <span className="text-xs text-gray-400 block">{token.name}</span>
-                  </div>
-
-                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-primary/20 text-primary border border-primary/40">
-                    <Flame className="w-3 h-3" />
-                    Buyback & Burn
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-2 gap-2 text-xs pt-1">
-                  <div className="p-2.5 bg-background rounded-lg border border-border/80">
-                    <span className="text-[11px] text-gray-400 block">Stock Backing</span>
-                    <span className="font-bold text-white">{token.stockSymbol}</span>
-                  </div>
-                  <div className="p-2.5 bg-background rounded-lg border border-border/80">
-                    <span className="text-[11px] text-gray-400 block">Accumulated Stock</span>
-                    <span className="font-bold text-primary">
-                      {token.totalRawCollected.toFixed(2)} {token.stockSymbol}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="p-2.5 bg-blue-950/20 border border-blue-900/40 rounded-lg text-xs space-y-1">
-                  <span className="text-[11px] text-blue-300 font-medium block">
-                    Canonical Equity Backing
-                  </span>
-                  <span className="text-sm font-bold text-white">
-                    {token.treasuryBurnedShares.toFixed(2)} Shares of {token.stockSymbol.slice(1)} Equity
-                  </span>
-                  <p className="text-[10px] text-blue-300/80">
-                    All fees sent to 0x...dEaD automatically accrue to long-term stock value.
-                  </p>
-                </div>
-
-                <div className="pt-2 border-t border-border flex justify-between items-center text-xs">
-                  <span className="text-gray-400">Treasury Destination:</span>
-                  <a
-                    href={`${explorerUrl}/address/0x000000000000000000000000000000000000dEaD`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center space-x-1 text-primary hover:underline font-mono text-[11px]"
-                  >
-                    <span>0x...dEaD (Burned)</span>
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
-                </div>
+          <div className="bg-surface border border-border rounded-xl p-6 space-y-4">
+            <div className="flex items-center space-x-3">
+              <div className="p-3 bg-primary/10 rounded-xl text-primary">
+                <Building2 className="w-6 h-6" />
               </div>
-            ))}
+              <div>
+                <h2 className="text-base font-bold text-white">Stock Treasury Alignment Ecosystem</h2>
+                <p className="text-xs text-gray-400">
+                  Projects that permanently redirect creator fees to Coinbase tokenized stock treasuries to buyback and burn shares.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+              {communityTokens
+                .filter((t) => t.isTreasuryRedirected)
+                .map((token) => (
+                  <div
+                    key={token.symbol}
+                    className="p-4 bg-background border border-border rounded-xl space-y-3"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-2">
+                        <span className="font-bold text-white text-sm">${token.symbol}</span>
+                        <span className="text-xs text-gray-400">({token.name})</span>
+                      </div>
+                      <span className="text-[10px] bg-green-950/60 text-green-300 px-2 py-0.5 rounded-full border border-green-800">
+                        Active Treasury
+                      </span>
+                    </div>
+
+                    <div className="text-xs space-y-1 text-gray-300">
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Pairing Stock:</span>
+                        <span className="font-bold">{token.pairedStockSymbol}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Cumulative Burned Shares:</span>
+                        <span className="text-primary font-bold">
+                          {(token.treasuryBurnedShares || 0).toFixed(2)} shares
+                        </span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-400">Unclaimed Pool Balance:</span>
+                        <span className="text-warning font-medium">
+                          {(token.claimableRawFees || 0).toFixed(3)} {token.pairedStockSymbol}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+            </div>
           </div>
         </div>
       )}
