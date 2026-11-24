@@ -3,6 +3,7 @@ pragma solidity 0.8.26;
 
 import {Test, console2} from "forge-std/Test.sol";
 import {BulldotFactory} from "../src/BulldotFactory.sol";
+import {BulldotRouter} from "../src/BulldotRouter.sol";
 import {BulldotCurveDeployer} from "../src/BulldotCurveDeployer.sol";
 import {BulldotBondingCurve} from "../src/BulldotBondingCurve.sol";
 import {BulldotToken} from "../src/BulldotToken.sol";
@@ -148,5 +149,80 @@ contract BaseSepoliaForkTest is Test {
         address dead = address(0x000000000000000000000000000000000000dEaD);
         assertTrue(bCOIN.balanceOf(dead) > 0);
         assertTrue(BulldotToken(tokenAddr).balanceOf(dead) > 0);
+    }
+
+    function test_ForkBaseSepolia_RealV4EthToStockToMemeAndSellToEth() public {
+        if (block.chainid != 84532) {
+            console2.log("Not on Base Sepolia fork, skipping real v4 ETH routing test.");
+            return;
+        }
+
+        BulldotRouter router = new BulldotRouter(address(factory), BASE_SEPOLIA_POOL_MANAGER);
+
+        // 1. Seed real Uniswap v4 ETH/bCOIN pool on Base Sepolia PoolManager
+        vm.deal(creator, 1 ether);
+        vm.startPrank(creator);
+        bCOIN.approve(address(router), type(uint256).max);
+        uint128 liqAdded = router.seedEthStockPool{value: 0.0004 ether}(address(bCOIN), 2 * 1e18);
+        assertTrue(liqAdded > 0, "Real Uniswap v4 liquidity must be added");
+
+        // 2. Launch Bonding Curve paired with bCOIN
+        (address tokenAddr, ) = factory.createBondingCurve(
+            IBulldotFactory.BondingCurveParams({
+                name: "ETH Route Token",
+                symbol: "ERT",
+                b20Stock: address(bCOIN),
+                feeRecipient: feeRecipient,
+                creatorFeeBps: 100,
+                maxWalletBps: 200
+            })
+        );
+        vm.stopPrank();
+
+        // 3. Read live on-chain 2-hop quote for 0.0001 ETH -> bCOIN -> ERT
+        (uint256 quotedTokens, uint256 estStock, , ) = router.getQuoteEthToTokens(
+            tokenAddr,
+            address(bCOIN),
+            0.0001 ether
+        );
+        assertTrue(quotedTokens > 0 && estStock > 0, "Live v4 2-hop buy quote must be positive");
+
+        // 4. Execute real atomic ETH -> bCOIN -> ERT buy via Uniswap v4 + BondingCurve
+        vm.deal(buyer, 1 ether);
+        uint256 buyerEthBefore = buyer.balance;
+        vm.prank(buyer);
+        uint256 tokensBought = router.swapEthForTokens{value: 0.0001 ether}(
+            tokenAddr,
+            address(bCOIN),
+            (quotedTokens * 95) / 100,
+            buyer,
+            block.timestamp + 300
+        );
+        assertTrue(tokensBought > 0);
+        assertEq(BulldotToken(tokenAddr).balanceOf(buyer), tokensBought);
+        assertEq(buyerEthBefore - buyer.balance, 0.0001 ether);
+
+        // 5. Execute real atomic ERT -> bCOIN -> ETH sell back to buyer's ETH wallet
+        uint256 sellAmount = tokensBought / 2;
+        (uint256 quotedEthOut, , , ) = router.getQuoteTokensToEth(tokenAddr, address(bCOIN), sellAmount);
+        assertTrue(quotedEthOut > 0, "Live v4 2-hop sell quote must be positive");
+
+        vm.startPrank(buyer);
+        BulldotToken(tokenAddr).approve(address(router), sellAmount);
+        uint256 ethBeforeSell = buyer.balance;
+        uint256 ethReceived = router.swapTokensForEth(
+            tokenAddr,
+            address(bCOIN),
+            sellAmount,
+            (quotedEthOut * 95) / 100,
+            buyer,
+            block.timestamp + 300
+        );
+        vm.stopPrank();
+
+        assertTrue(ethReceived > 0, "Seller must receive real Native ETH");
+        assertEq(buyer.balance, ethBeforeSell + ethReceived);
+        assertEq(address(router).balance, 0, "Router must hold zero leftover ETH");
+        assertEq(bCOIN.balanceOf(address(router)), 0, "Router must hold zero leftover B20");
     }
 }

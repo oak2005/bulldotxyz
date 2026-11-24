@@ -250,5 +250,60 @@ contract BulldotRouterTest is Test {
         // Buyer must NOT lose 100 bCOIN: excess was refunded by router
         assertTrue(actualConsumed < 5 * 1e18, "Router must refund excess graduation capital");
     }
+
+    function test_RouterEthToStockToMemeBuyAndSell() public {
+        // Seed ETH / bCOIN v4 pool on mock PoolManager
+        vm.deal(creator, 10 ether);
+        bCOIN.mint(creator, 10 * 1e18);
+        vm.startPrank(creator);
+        bCOIN.approve(address(router), type(uint256).max);
+        router.seedEthStockPool{value: 1 ether}(address(bCOIN), 10 * 1e18);
+
+        (address tokenAddr, ) = factory.createBondingCurve(
+            IBulldotFactory.BondingCurveParams({
+                name: "Unit ETH Route",
+                symbol: "UER",
+                b20Stock: address(bCOIN),
+                feeRecipient: creator,
+                creatorFeeBps: 100,
+                maxWalletBps: 0
+            })
+        );
+        vm.stopPrank();
+
+        (uint256 quotedTokens, , , ) = router.getQuoteEthToTokens(tokenAddr, address(bCOIN), 0.1 ether);
+        assertTrue(quotedTokens > 0);
+
+        vm.deal(buyer, 5 ether);
+        vm.prank(buyer);
+        uint256 bought = router.swapEthForTokens{value: 0.1 ether}(
+            tokenAddr,
+            address(bCOIN),
+            quotedTokens,
+            buyer,
+            block.timestamp + 300
+        );
+        assertEq(BulldotToken(tokenAddr).balanceOf(buyer), bought);
+
+        uint256 sellAmt = bought / 2;
+        (uint256 quotedEth, , , ) = router.getQuoteTokensToEth(tokenAddr, address(bCOIN), sellAmt);
+        assertTrue(quotedEth > 0);
+
+        vm.startPrank(buyer);
+        BulldotToken(tokenAddr).approve(address(router), sellAmt);
+        uint256 ethBefore = buyer.balance;
+        uint256 ethGot = router.swapTokensForEth(
+            tokenAddr,
+            address(bCOIN),
+            sellAmt,
+            (quotedEth * 99) / 100,
+            buyer,
+            block.timestamp + 300
+        );
+        vm.stopPrank();
+
+        assertApproxEqRel(ethGot, quotedEth, 0.01e18);
+        assertEq(buyer.balance, ethBefore + ethGot);
+    }
 }
 

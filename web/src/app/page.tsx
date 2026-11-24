@@ -24,8 +24,9 @@ import {
   Building2,
   ArrowRight,
 } from 'lucide-react';
-import { useAccount, useChainId, useSwitchChain } from 'wagmi';
+import { useAccount, useSwitchChain } from 'wagmi';
 import { baseSepolia } from 'wagmi/chains';
+import { zeroAddress } from 'viem';
 import { useProtocol, TokenPair, SwapQuoteResult } from '../context/ProtocolContext';
 
 function SwapContent() {
@@ -38,6 +39,8 @@ function SwapContent() {
     isSepolia,
     isMainnetPaused,
     isLoadingPools,
+    ethBalance,
+    ethStockPoolReady,
     stockBalances,
     tokenBalances,
     communityTokens,
@@ -85,13 +88,14 @@ function SwapContent() {
     VERIFIED_B20_STOCKS[0];
 
   const [activeTab, setActiveTab] = useState<'SWAP' | 'LIQUIDITY'>('SWAP');
-  const [fromAmount, setFromAmount] = useState('0.1');
+  const [useEthRoute, setUseEthRoute] = useState<boolean>(true);
+  const [fromAmount, setFromAmount] = useState('0.0001');
   const [isTokenToStock, setIsTokenToStock] = useState(false);
-  const [slippage, setSlippage] = useState('0.5');
+  const [slippage, setSlippage] = useState('1.0');
   const [customSlippage, setCustomSlippage] = useState('');
   const [showSettings, setShowSettings] = useState(false);
 
-  // Live on-chain quote state from BulldotRouter.getQuote
+  // Live on-chain quote state from BulldotRouter
   const [onChainQuote, setOnChainQuote] = useState<SwapQuoteResult | null>(null);
   const [isQuoting, setIsQuoting] = useState(false);
 
@@ -102,7 +106,8 @@ function SwapContent() {
 
   const mockMultiplier = 1.0; // 1 Token = 1 Share unless split updated on-chain
   const parsedFrom = parseFloat(fromAmount) || 0;
-  const effectiveSlippage = customSlippage ? parseFloat(customSlippage) || 0.5 : parseFloat(slippage);
+  const effectiveSlippage = customSlippage ? parseFloat(customSlippage) || 1.0 : parseFloat(slippage);
+  const isEthPoolSeeded = Boolean(ethStockPoolReady[activeStock.symbol]);
 
   useEffect(() => {
     let cancelled = false;
@@ -115,7 +120,13 @@ function SwapContent() {
     setIsQuoting(true);
     const timer = setTimeout(async () => {
       try {
-        const res = await getSwapQuote(activeToken.tokenAddress, fromAmount, isTokenToStock);
+        const res = await getSwapQuote(
+          activeToken.tokenAddress,
+          activeStock.address[baseSepolia.id],
+          fromAmount,
+          isTokenToStock,
+          useEthRoute
+        );
         if (!cancelled) {
           setOnChainQuote(res);
           setIsQuoting(false);
@@ -132,25 +143,30 @@ function SwapContent() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [activeToken?.tokenAddress, activeToken?.b20Reserve, fromAmount, parsedFrom, isTokenToStock]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [activeToken?.tokenAddress, activeToken?.b20Reserve, activeStock.symbol, fromAmount, parsedFrom, isTokenToStock, useEthRoute, isEthPoolSeeded]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Balances
+  // Balances & Active Assets
   const stockBalance = stockBalances[activeStock.symbol] || 0;
   const tokenBalance = (activeToken && tokenBalances[activeToken.symbol]) || 0;
-  const userPayingBalance = isTokenToStock ? tokenBalance : stockBalance;
-  const userReceivingBalance = isTokenToStock ? stockBalance : tokenBalance;
+  const baseAssetBalance = useEthRoute ? ethBalance : stockBalance;
+  const baseAssetSymbol = useEthRoute ? 'ETH' : activeStock.symbol;
+
+  const userPayingBalance = isTokenToStock ? tokenBalance : baseAssetBalance;
+  const userReceivingBalance = isTokenToStock ? baseAssetBalance : tokenBalance;
 
   const rate = activeToken?.ratePerStock || 35766667;
   const rawToAmount = onChainQuote ? onChainQuote.amountOut : 0;
+  const intermediateStockOut = onChainQuote ? onChainQuote.intermediateStockOut : 0;
 
+  const outputDecimals = isTokenToStock ? (useEthRoute ? 6 : 6) : 0;
   const formattedToAmount = isQuoting
     ? '...'
     : isTokenToStock
-    ? rawToAmount.toFixed(6)
+    ? rawToAmount.toFixed(outputDecimals)
     : Math.floor(rawToAmount).toLocaleString();
 
   const minReceived = (rawToAmount * (1 - effectiveSlippage / 100)).toLocaleString(undefined, {
-    maximumFractionDigits: isTokenToStock ? 6 : 0,
+    maximumFractionDigits: isTokenToStock ? outputDecimals : 0,
   });
 
   const priceImpact = onChainQuote ? (onChainQuote.priceImpactBps / 100).toFixed(2) : '0.00';
@@ -158,7 +174,7 @@ function SwapContent() {
 
   // Fees from on-chain quote
   const creatorFeePercent = (activeToken?.creatorFeeBps || 100) / 100;
-  const poolFeePercent = activeToken?.isGraduated ? 0.3 : 0.0;
+  const poolFeePercent = activeToken?.isGraduated || useEthRoute ? 0.3 : 0.0;
   const estimatedFeeB20 = onChainQuote ? onChainQuote.fee.toFixed(6) : '0.0000';
 
   // Anti-sniper max-wallet guard (prevents predictable reverted txs)
@@ -176,21 +192,37 @@ function SwapContent() {
 
   const handleMaxClick = () => {
     if (userPayingBalance > 0) {
-      setFromAmount(userPayingBalance.toString());
+      const safeMax = !isTokenToStock && useEthRoute ? Math.max(0, userPayingBalance - 0.0002) : userPayingBalance;
+      setFromAmount(safeMax.toFixed(useEthRoute ? 5 : 4).replace(/\.?0+$/, '') || '0');
+    }
+  };
+
+  const handleToggleRoute = (nextUseEth: boolean) => {
+    setUseEthRoute(nextUseEth);
+    setErrorMessage(null);
+    if (!isTokenToStock) {
+      setFromAmount(nextUseEth ? '0.0001' : '0.1');
     }
   };
 
   const handleSwap = async () => {
     if (!activeToken || parsedFrom <= 0 || parsedFrom > userPayingBalance || exceedsMaxWallet) return;
+    if (useEthRoute && !isEthPoolSeeded) {
+      setErrorMessage(`ETH/${activeStock.symbol} Uniswap v4 pool is not seeded yet. Switch to Direct ${activeStock.symbol} or seed the pool.`);
+      return;
+    }
     setErrorMessage(null);
 
     try {
-      const assetToApprove = isTokenToStock
-        ? activeToken.tokenAddress
-        : activeStock.address[baseSepolia.id];
-
-      setTxState('APPROVING');
-      await executeApproval(assetToApprove, fromAmount);
+      if (isTokenToStock || !useEthRoute) {
+        const assetToApprove = isTokenToStock
+          ? activeToken.tokenAddress
+          : activeStock.address[baseSepolia.id];
+        setTxState('APPROVING');
+        await executeApproval(assetToApprove, fromAmount);
+      } else {
+        await executeApproval(zeroAddress, fromAmount);
+      }
 
       const quotedWei = onChainQuote?.amountOutWei || BigInt(0);
       const slippageFactor = BigInt(Math.max(0, Math.round(10_000 - effectiveSlippage * 100)));
@@ -203,6 +235,7 @@ function SwapContent() {
         fromAmount,
         minAmountOutWei,
         isTokenToStock,
+        useEthRoute,
       });
 
       setLastTxHash(hash);
@@ -358,6 +391,45 @@ function SwapContent() {
                   </button>
                 </div>
 
+                {/* Settlement Route Selector: Native ETH (2-Hop via Stock) vs Direct B20 Stock */}
+                <div className="bg-background border border-border rounded-xl p-1 grid grid-cols-2 gap-1 text-[11px]">
+                  <button
+                    type="button"
+                    onClick={() => handleToggleRoute(true)}
+                    className={`py-1.5 px-2 rounded-lg font-semibold transition-all flex items-center justify-center space-x-1 ${
+                      useEthRoute
+                        ? 'bg-primary text-white shadow-sm'
+                        : 'text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    <span>ETH &rarr; {activeStock.symbol} &rarr; Token</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleRoute(false)}
+                    className={`py-1.5 px-2 rounded-lg font-semibold transition-all flex items-center justify-center space-x-1 ${
+                      !useEthRoute
+                        ? 'bg-surface-hover text-white border border-border shadow-sm'
+                        : 'text-gray-400 hover:text-white'
+                    }`}
+                  >
+                    <span>Direct {activeStock.symbol}</span>
+                  </button>
+                </div>
+
+                {useEthRoute && !isEthPoolSeeded && (
+                  <div className="p-2.5 bg-amber-950/40 border border-amber-800/60 rounded-xl text-[11px] text-amber-200 flex items-center justify-between gap-2">
+                    <span>ETH/{activeStock.symbol} v4 pool not seeded on current Router yet.</span>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleRoute(false)}
+                      className="underline font-bold text-amber-300 whitespace-nowrap"
+                    >
+                      Use {activeStock.symbol}
+                    </button>
+                  </div>
+                )}
+
                 {/* Slippage Settings Drawer */}
                 {showSettings && (
                   <div className="p-3 bg-background border border-border rounded-xl space-y-2 text-xs">
@@ -400,8 +472,11 @@ function SwapContent() {
                     <span>You Pay</span>
                     <div className="flex items-center space-x-1.5">
                       <span>
-                        Balance: {userPayingBalance.toLocaleString(undefined, { maximumFractionDigits: isTokenToStock ? 0 : 3 })}{' '}
-                        {isTokenToStock ? activeToken.symbol : activeStock.symbol}
+                        Balance:{' '}
+                        {userPayingBalance.toLocaleString(undefined, {
+                          maximumFractionDigits: isTokenToStock ? 0 : 4,
+                        })}{' '}
+                        {isTokenToStock ? activeToken.symbol : baseAssetSymbol}
                       </span>
                       {userPayingBalance > 0 && (
                         <button
@@ -411,7 +486,7 @@ function SwapContent() {
                           MAX
                         </button>
                       )}
-                      {!isTokenToStock && isSepolia && (
+                      {!isTokenToStock && !useEthRoute && isSepolia && (
                         <button
                           onClick={() => setIsFaucetOpen(true)}
                           className="text-[10px] text-emerald-400 hover:text-emerald-300 font-semibold underline"
@@ -432,10 +507,17 @@ function SwapContent() {
                     />
 
                     {!isTokenToStock ? (
-                      <div className="flex items-center space-x-1.5 bg-surface-hover border border-border rounded-lg px-3 py-1.5 text-white font-medium text-xs">
-                        <span className="font-bold">{activeStock.symbol}</span>
-                        <span className="text-[10px] text-gray-400">({activeStock.ticker})</span>
-                      </div>
+                      useEthRoute ? (
+                        <div className="flex items-center space-x-1.5 bg-surface-hover border border-border rounded-lg px-3 py-1.5 text-white font-medium text-xs">
+                          <span className="font-bold">ETH</span>
+                          <span className="text-[10px] text-primary">(via {activeStock.symbol})</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center space-x-1.5 bg-surface-hover border border-border rounded-lg px-3 py-1.5 text-white font-medium text-xs">
+                          <span className="font-bold">{activeStock.symbol}</span>
+                          <span className="text-[10px] text-gray-400">({activeStock.ticker})</span>
+                        </div>
+                      )
                     ) : (
                       <div className="flex items-center space-x-1.5 bg-surface-hover border border-border rounded-lg px-3 py-1.5 text-white font-medium text-xs">
                         <span>🐂</span>
@@ -444,15 +526,17 @@ function SwapContent() {
                     )}
                   </div>
 
-                  {/* Subtext USD */}
+                  {/* Subtext */}
                   <div className="mt-2 text-[11px] text-gray-500 flex justify-between">
                     <span>
                       {!isTokenToStock
-                        ? `~$${(parsedFrom * (activeToken?.stockPriceUsd || 250)).toFixed(2)} USD`
+                        ? useEthRoute
+                          ? `Est. intermediate: ~${intermediateStockOut.toFixed(4)} ${activeStock.symbol} (~$${(intermediateStockOut * stockUsd).toFixed(2)})`
+                          : `~$${(parsedFrom * stockUsd).toFixed(2)} USD`
                         : `~$${(parsedFrom * parseFloat(tokenPriceUsd)).toFixed(2)} USD`}
                     </span>
                     <span className="text-gray-400">
-                      1 {activeStock.symbol} = ${(activeToken?.stockPriceUsd || 250).toFixed(2)}
+                      1 {activeStock.symbol} = ${stockUsd.toFixed(2)}
                     </span>
                   </div>
                 </div>
@@ -462,7 +546,7 @@ function SwapContent() {
                   <button
                     onClick={() => setIsTokenToStock(!isTokenToStock)}
                     className="bg-surface border border-border hover:border-primary p-2 rounded-xl text-gray-400 hover:text-white transition-all shadow-md"
-                    title="Switch swap direction"
+                    title="Switch buy / sell direction"
                   >
                     <ArrowDownUp className="w-4 h-4" />
                   </button>
@@ -473,8 +557,11 @@ function SwapContent() {
                   <div className="flex justify-between items-center text-xs text-gray-400 mb-1.5">
                     <span>You Receive (Estimated)</span>
                     <span>
-                      Balance: {userReceivingBalance.toLocaleString(undefined, { maximumFractionDigits: isTokenToStock ? 3 : 0 })}{' '}
-                      {isTokenToStock ? activeStock.symbol : activeToken.symbol}
+                      Balance:{' '}
+                      {userReceivingBalance.toLocaleString(undefined, {
+                        maximumFractionDigits: isTokenToStock ? 4 : 0,
+                      })}{' '}
+                      {isTokenToStock ? baseAssetSymbol : activeToken.symbol}
                     </span>
                   </div>
 
@@ -488,10 +575,17 @@ function SwapContent() {
                     />
 
                     {isTokenToStock ? (
-                      <div className="flex items-center space-x-1.5 bg-surface-hover border border-border rounded-lg px-3 py-1.5 text-white font-medium text-xs">
-                        <span className="font-bold">{activeStock.symbol}</span>
-                        <span className="text-[10px] text-gray-400">({activeStock.ticker})</span>
-                      </div>
+                      useEthRoute ? (
+                        <div className="flex items-center space-x-1.5 bg-surface-hover border border-border rounded-lg px-3 py-1.5 text-white font-medium text-xs">
+                          <span className="font-bold">ETH</span>
+                          <span className="text-[10px] text-primary">(via {activeStock.symbol})</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center space-x-1.5 bg-surface-hover border border-border rounded-lg px-3 py-1.5 text-white font-medium text-xs">
+                          <span className="font-bold">{activeStock.symbol}</span>
+                          <span className="text-[10px] text-gray-400">({activeStock.ticker})</span>
+                        </div>
+                      )
                     ) : (
                       <div className="flex items-center space-x-1.5 bg-surface-hover border border-border rounded-lg px-3 py-1.5 text-white font-medium text-xs">
                         <span>🐂</span>
@@ -500,19 +594,38 @@ function SwapContent() {
                     )}
                   </div>
 
-                  <div className="mt-2 text-[11px] text-gray-500">
-                    <span>Guaranteed Minimum ({effectiveSlippage}% max slippage): {minReceived}</span>
+                  <div className="mt-2 text-[11px] text-gray-500 flex justify-between">
+                    <span>
+                      Min ({effectiveSlippage}% slippage): {minReceived}{' '}
+                      {isTokenToStock ? baseAssetSymbol : activeToken.symbol}
+                    </span>
+                    {isTokenToStock && useEthRoute && intermediateStockOut > 0 && (
+                      <span>Via ~{intermediateStockOut.toFixed(4)} {activeStock.symbol}</span>
+                    )}
                   </div>
                 </div>
 
                 {/* Pricing, Impact, and Fee Breakdown */}
                 <div className="p-3 bg-background/50 border border-border/60 rounded-xl space-y-2 text-xs">
                   <div className="flex justify-between text-gray-400">
+                    <span>Execution Route</span>
+                    <span className="text-primary font-semibold text-[11px]">
+                      {useEthRoute
+                        ? isTokenToStock
+                          ? `$${activeToken.symbol} → ${activeStock.symbol} (Curve) → ETH (Uniswap v4)`
+                          : `ETH → ${activeStock.symbol} (Uniswap v4) → $${activeToken.symbol}`
+                        : isTokenToStock
+                        ? `$${activeToken.symbol} → ${activeStock.symbol}`
+                        : `${activeStock.symbol} → $${activeToken.symbol}`}
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between text-gray-400">
                     <span>Dual Price</span>
                     <div className="text-right text-gray-200">
                       <span className="block font-medium">1 ${activeToken.symbol} ≈ ${tokenPriceUsd} USD</span>
                       <span className="text-[10px] text-gray-400">
-                        (1 {activeStock.symbol} ≈ {rate.toLocaleString()} {activeToken.symbol})
+                        (1 {activeStock.symbol} ≈ {rate.toLocaleString(undefined, { maximumFractionDigits: 0 })} {activeToken.symbol})
                       </span>
                     </div>
                   </div>
@@ -610,9 +723,9 @@ function SwapContent() {
                         disabled
                         className="w-full py-3.5 bg-surface-hover border border-border text-gray-500 rounded-xl font-bold cursor-not-allowed text-xs"
                       >
-                        Insufficient {isTokenToStock ? activeToken.symbol : activeStock.symbol} Balance
+                        Insufficient {isTokenToStock ? activeToken.symbol : baseAssetSymbol} Balance
                       </button>
-                      {!isTokenToStock && isSepolia && (
+                      {!isTokenToStock && !useEthRoute && isSepolia && (
                         <button
                           onClick={() => setIsFaucetOpen(true)}
                           className="w-full py-2 bg-emerald-950/60 hover:bg-emerald-900/60 border border-emerald-800 text-emerald-300 rounded-xl font-semibold text-xs transition-colors flex items-center justify-center space-x-1.5"
@@ -633,7 +746,7 @@ function SwapContent() {
                     </div>
                   ) : (
                     <button
-                      disabled={parsedFrom <= 0 || isQuoting || txState !== 'IDLE'}
+                      disabled={parsedFrom <= 0 || isQuoting || txState !== 'IDLE' || (useEthRoute && !isEthPoolSeeded)}
                       onClick={handleSwap}
                       className="w-full py-3.5 bg-primary hover:bg-primary-hover disabled:bg-surface-hover disabled:text-gray-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-primary/20 flex items-center justify-center space-x-2 text-xs"
                     >
@@ -649,7 +762,15 @@ function SwapContent() {
                           <span>Confirming Swap in Wallet...</span>
                         </>
                       )}
-                      {txState === 'IDLE' && <span>Swap {activeStock.symbol} / ${activeToken.symbol}</span>}
+                      {txState === 'IDLE' && (
+                        <span>
+                          {useEthRoute
+                            ? isTokenToStock
+                              ? `Sell $${activeToken.symbol} → ${activeStock.symbol} → ETH`
+                              : `Buy $${activeToken.symbol} with ETH (via ${activeStock.symbol})`
+                            : `Swap ${activeStock.symbol} / $${activeToken.symbol}`}
+                        </span>
+                      )}
                       {txState === 'CONFIRMED' && <span>Trade Confirmed On-Chain!</span>}
                     </button>
                   )}

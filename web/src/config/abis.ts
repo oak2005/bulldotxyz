@@ -317,6 +317,44 @@ export const BONDING_CURVE_ABI = [
 
 export const ROUTER_ABI = [
   {
+    type: 'event',
+    name: 'EthToTokenSwapped',
+    inputs: [
+      { indexed: true, name: 'sender', type: 'address' },
+      { indexed: true, name: 'recipient', type: 'address' },
+      { indexed: true, name: 'token', type: 'address' },
+      { indexed: false, name: 'b20Stock', type: 'address' },
+      { indexed: false, name: 'ethIn', type: 'uint256' },
+      { indexed: false, name: 'b20Intermediate', type: 'uint256' },
+      { indexed: false, name: 'tokensOut', type: 'uint256' },
+    ],
+  },
+  {
+    type: 'event',
+    name: 'TokenToEthSwapped',
+    inputs: [
+      { indexed: true, name: 'sender', type: 'address' },
+      { indexed: true, name: 'recipient', type: 'address' },
+      { indexed: true, name: 'token', type: 'address' },
+      { indexed: false, name: 'b20Stock', type: 'address' },
+      { indexed: false, name: 'tokensIn', type: 'uint256' },
+      { indexed: false, name: 'b20Intermediate', type: 'uint256' },
+      { indexed: false, name: 'ethOut', type: 'uint256' },
+    ],
+  },
+  {
+    type: 'function',
+    name: 'getEthStockReserves',
+    inputs: [{ name: 'b20Stock', type: 'address' }],
+    outputs: [
+      { name: 'sqrtPriceX96', type: 'uint160' },
+      { name: 'liquidity', type: 'uint128' },
+      { name: 'virtualEth', type: 'uint256' },
+      { name: 'virtualStock', type: 'uint256' },
+    ],
+    stateMutability: 'view',
+  },
+  {
     type: 'function',
     name: 'getQuote',
     inputs: [
@@ -330,6 +368,65 @@ export const ROUTER_ABI = [
       { name: 'priceImpactBps', type: 'uint256' },
     ],
     stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'getQuoteEthToTokens',
+    inputs: [
+      { name: 'tokenOrCurve', type: 'address' },
+      { name: 'b20Stock', type: 'address' },
+      { name: 'ethAmountIn', type: 'uint256' },
+    ],
+    outputs: [
+      { name: 'tokensOut', type: 'uint256' },
+      { name: 'estimatedStockOut', type: 'uint256' },
+      { name: 'totalFeeStock', type: 'uint256' },
+      { name: 'priceImpactBps', type: 'uint256' },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'getQuoteTokensToEth',
+    inputs: [
+      { name: 'tokenOrCurve', type: 'address' },
+      { name: 'b20Stock', type: 'address' },
+      { name: 'tokenAmountIn', type: 'uint256' },
+    ],
+    outputs: [
+      { name: 'ethOut', type: 'uint256' },
+      { name: 'estimatedStockOut', type: 'uint256' },
+      { name: 'totalFeeStock', type: 'uint256' },
+      { name: 'priceImpactBps', type: 'uint256' },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'swapEthForTokens',
+    inputs: [
+      { name: 'tokenOrCurve', type: 'address' },
+      { name: 'b20Stock', type: 'address' },
+      { name: 'minTokensOut', type: 'uint256' },
+      { name: 'recipient', type: 'address' },
+      { name: 'deadline', type: 'uint256' },
+    ],
+    outputs: [{ name: 'tokensOut', type: 'uint256' }],
+    stateMutability: 'payable',
+  },
+  {
+    type: 'function',
+    name: 'swapTokensForEth',
+    inputs: [
+      { name: 'tokenOrCurve', type: 'address' },
+      { name: 'b20Stock', type: 'address' },
+      { name: 'tokenAmountIn', type: 'uint256' },
+      { name: 'minEthOut', type: 'uint256' },
+      { name: 'recipient', type: 'address' },
+      { name: 'deadline', type: 'uint256' },
+    ],
+    outputs: [{ name: 'ethOut', type: 'uint256' }],
+    stateMutability: 'nonpayable',
   },
   {
     type: 'function',

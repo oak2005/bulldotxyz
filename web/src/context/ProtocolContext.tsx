@@ -70,6 +70,7 @@ export interface TokenPair {
 export interface SwapQuoteResult {
   amountOutWei: bigint;
   amountOut: number;
+  intermediateStockOut: number;
   feeWei: bigint;
   fee: number;
   priceImpactBps: number;
@@ -82,6 +83,8 @@ interface ProtocolContextType {
   isLoadingPools: boolean;
   treasuryFeeBps: number;
   treasuryFeeRecipient: string;
+  ethBalance: number;
+  ethStockPoolReady: Record<string, boolean>;
   stockBalances: Record<string, number>;
   tokenBalances: Record<string, number>;
   communityTokens: TokenPair[];
@@ -89,8 +92,10 @@ interface ProtocolContextType {
   claimFaucet: (stockSymbol?: string) => Promise<string>;
   getSwapQuote: (
     tokenAddress: Address,
+    stockAddress: Address,
     amountHuman: string,
-    isTokenToStock: boolean
+    isTokenToStock: boolean,
+    useEthRoute?: boolean
   ) => Promise<SwapQuoteResult>;
   executeApproval: (assetAddress: Address, amountHuman: string) => Promise<string>;
   executeSwap: (params: {
@@ -99,6 +104,7 @@ interface ProtocolContextType {
     fromAmount: string;
     minAmountOutWei: bigint;
     isTokenToStock: boolean;
+    useEthRoute?: boolean;
   }) => Promise<string>;
   executeLaunch: (params: {
     name: string;
@@ -150,6 +156,9 @@ function formatWalletError(err: any): string {
   if (msg.includes('Unauthorized')) {
     return 'Only the designated token manager wallet can perform this action.';
   }
+  if (msg.includes('PoolNotInitialized')) {
+    return 'ETH/Stock Uniswap v4 pool is not seeded yet on this network. Use Direct Stock swap or seed the pool first.';
+  }
   if (msg.includes('InsufficientBalance') || msg.includes('TransferFailed')) {
     return 'Insufficient token balance or allowance for this transaction.';
   }
@@ -173,6 +182,8 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
   const isSepolia = !isMainnet;
   const isMainnetPaused = true;
 
+  const [ethBalance, setEthBalance] = useState<number>(0);
+  const [ethStockPoolReady, setEthStockPoolReady] = useState<Record<string, boolean>>({});
   const [stockBalances, setStockBalances] = useState<Record<string, number>>(DEFAULT_STOCK_BALANCES);
   const [tokenBalances, setTokenBalances] = useState<Record<string, number>>({});
   const [communityTokens, setCommunityTokens] = useState<TokenPair[]>([]);
@@ -205,6 +216,8 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
 
     if (isMainnet && isMainnetPaused) {
       setCommunityTokens([]);
+      setEthBalance(0);
+      setEthStockPoolReady({});
       setStockBalances(DEFAULT_STOCK_BALANCES);
       setTokenBalances({});
       setTreasuryFeeBps(0);
@@ -216,10 +229,30 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
     const activeUserOnSepolia = isConnected && address && chainId === baseSepolia.id ? address : undefined;
 
     try {
-      // 1. Read user's real on-chain Base Sepolia stock balances (starts at 0 until claimed on-chain)
+      // 1. Read user's real ETH & Base Sepolia stock balances + Uniswap v4 ETH/Stock pool availability
+      const ethPoolStatusResults = await Promise.all(
+        VERIFIED_B20_STOCKS.map((stock) =>
+          publicClient
+            .readContract({
+              address: sepoliaConfig.router,
+              abi: ROUTER_ABI,
+              functionName: 'getEthStockReserves',
+              args: [stock.address[baseSepolia.id]],
+            })
+            .then((res) => BigInt(res[1]) > BigInt(0))
+            .catch(() => false)
+        )
+      );
+      const nextPoolReady: Record<string, boolean> = {};
+      VERIFIED_B20_STOCKS.forEach((stock, idx) => {
+        nextPoolReady[stock.symbol] = ethPoolStatusResults[idx];
+      });
+      setEthStockPoolReady(nextPoolReady);
+
       if (activeUserOnSepolia) {
-        const stockBalResults = await Promise.all(
-          VERIFIED_B20_STOCKS.map((stock) =>
+        const [nativeBalRaw, ...stockBalResults] = await Promise.all([
+          publicClient.getBalance({ address: activeUserOnSepolia }).catch(() => BigInt(0)),
+          ...VERIFIED_B20_STOCKS.map((stock) =>
             publicClient
               .readContract({
                 address: stock.address[baseSepolia.id],
@@ -228,14 +261,16 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
                 args: [activeUserOnSepolia],
               })
               .catch(() => BigInt(0))
-          )
-        );
+          ),
+        ]);
+        setEthBalance(Number(formatUnits(nativeBalRaw, 18)));
         const nextStockBalances: Record<string, number> = {};
         VERIFIED_B20_STOCKS.forEach((stock, idx) => {
           nextStockBalances[stock.symbol] = Number(formatUnits(stockBalResults[idx], 18));
         });
         setStockBalances(nextStockBalances);
       } else {
+        setEthBalance(0);
         setStockBalances(DEFAULT_STOCK_BALANCES);
       }
 
@@ -616,20 +651,44 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
     setFaucetTxHash(null);
   };
 
-  // 2. Live On-Chain Swap Quote via BulldotRouter.getQuote
+  // 2. Live On-Chain Swap Quote via BulldotRouter (Direct Stock <-> Meme OR 2-hop ETH <-> Stock <-> Meme)
   const getSwapQuote = async (
     tokenAddress: Address,
+    stockAddress: Address,
     amountHuman: string,
-    isTokenToStock: boolean
+    isTokenToStock: boolean,
+    useEthRoute: boolean = false
   ): Promise<SwapQuoteResult> => {
-    if (!publicClient || !tokenAddress) {
-      return { amountOutWei: BigInt(0), amountOut: 0, feeWei: BigInt(0), fee: 0, priceImpactBps: 0 };
-    }
+    const emptyQuote: SwapQuoteResult = {
+      amountOutWei: BigInt(0),
+      amountOut: 0,
+      intermediateStockOut: 0,
+      feeWei: BigInt(0),
+      fee: 0,
+      priceImpactBps: 0,
+    };
+    if (!publicClient || !tokenAddress) return emptyQuote;
     const amountWei = toWeiSafe(amountHuman);
-    if (amountWei === BigInt(0)) {
-      return { amountOutWei: BigInt(0), amountOut: 0, feeWei: BigInt(0), fee: 0, priceImpactBps: 0 };
-    }
+    if (amountWei === BigInt(0)) return emptyQuote;
+
     try {
+      if (useEthRoute) {
+        const [outWei, estStockWei, feeWei, priceImpactBpsRaw] = await publicClient.readContract({
+          address: sepoliaConfig.router,
+          abi: ROUTER_ABI,
+          functionName: isTokenToStock ? 'getQuoteTokensToEth' : 'getQuoteEthToTokens',
+          args: [tokenAddress, stockAddress, amountWei],
+        });
+        return {
+          amountOutWei: outWei,
+          amountOut: Number(formatUnits(outWei, 18)),
+          intermediateStockOut: Number(formatUnits(estStockWei, 18)),
+          feeWei,
+          fee: Number(formatUnits(feeWei, 18)),
+          priceImpactBps: Number(priceImpactBpsRaw),
+        };
+      }
+
       const [amountOutWei, feeWei, priceImpactBpsRaw] = await publicClient.readContract({
         address: sepoliaConfig.router,
         abi: ROUTER_ABI,
@@ -639,18 +698,22 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
       return {
         amountOutWei,
         amountOut: Number(formatUnits(amountOutWei, 18)),
+        intermediateStockOut: 0,
         feeWei,
         fee: Number(formatUnits(feeWei, 18)),
         priceImpactBps: Number(priceImpactBpsRaw),
       };
     } catch {
-      return { amountOutWei: BigInt(0), amountOut: 0, feeWei: BigInt(0), fee: 0, priceImpactBps: 0 };
+      return emptyQuote;
     }
   };
 
   // 3. Exact ERC-20 Approval to BulldotRouter (skipped automatically if allowance >= needed)
   const executeApproval = async (assetAddress: Address, amountHuman: string): Promise<string> => {
     ensureSepoliaWallet();
+    if (assetAddress === zeroAddress) {
+      return 'NATIVE_ETH_NO_APPROVAL';
+    }
     const amountWei = toWeiSafe(amountHuman);
     if (amountWei === BigInt(0)) throw new Error('Invalid approval amount.');
 
@@ -679,19 +742,21 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // 4. Genuine On-Chain Swap via BulldotRouter
+  // 4. Genuine On-Chain Swap via BulldotRouter (Direct OR 2-Hop ETH <-> Stock <-> Meme)
   const executeSwap = async ({
     tokenAddress,
     stockAddress,
     fromAmount,
     minAmountOutWei,
     isTokenToStock,
+    useEthRoute = false,
   }: {
     tokenAddress: Address;
     stockAddress: Address;
     fromAmount: string;
     minAmountOutWei: bigint;
     isTokenToStock: boolean;
+    useEthRoute?: boolean;
   }): Promise<string> => {
     ensureSepoliaWallet();
     const amountInWei = toWeiSafe(fromAmount);
@@ -700,12 +765,32 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 1200);
 
     try {
-      const hash = await writeContractAsync({
-        address: sepoliaConfig.router,
-        abi: ROUTER_ABI,
-        functionName: isTokenToStock ? 'swapTokensForB20' : 'swapB20ForTokens',
-        args: [tokenAddress, stockAddress, amountInWei, minAmountOutWei, address!, deadline],
-      });
+      let hash: `0x${string}`;
+
+      if (useEthRoute && !isTokenToStock) {
+        hash = await writeContractAsync({
+          address: sepoliaConfig.router,
+          abi: ROUTER_ABI,
+          functionName: 'swapEthForTokens',
+          args: [tokenAddress, stockAddress, minAmountOutWei, address!, deadline],
+          value: amountInWei,
+        });
+      } else if (useEthRoute && isTokenToStock) {
+        hash = await writeContractAsync({
+          address: sepoliaConfig.router,
+          abi: ROUTER_ABI,
+          functionName: 'swapTokensForEth',
+          args: [tokenAddress, stockAddress, amountInWei, minAmountOutWei, address!, deadline],
+        });
+      } else {
+        hash = await writeContractAsync({
+          address: sepoliaConfig.router,
+          abi: ROUTER_ABI,
+          functionName: isTokenToStock ? 'swapTokensForB20' : 'swapB20ForTokens',
+          args: [tokenAddress, stockAddress, amountInWei, minAmountOutWei, address!, deadline],
+        });
+      }
+
       await publicClient!.waitForTransactionReceipt({ hash });
       await refreshProtocolState();
       return hash;
@@ -954,6 +1039,8 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
         isLoadingPools,
         treasuryFeeBps,
         treasuryFeeRecipient,
+        ethBalance,
+        ethStockPoolReady,
         stockBalances,
         tokenBalances,
         communityTokens,

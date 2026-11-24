@@ -4,7 +4,7 @@ pragma solidity 0.8.26;
 /**
  * @notice SECURITY NOTES:
  * - Minimal, self-contained Uniswap v4 interfaces for Base Sepolia (84532) and Base Mainnet (8453).
- * - Currencies must strictly satisfy `currency0 < currency1` when constructing PoolKey.
+ * - Currencies must strictly satisfy `currency0 < currency1` when constructing PoolKey (native ETH = address(0)).
  * - Reentrancy during unlockCallback must be guarded against if custom hooks or callbacks are used.
  */
 
@@ -32,6 +32,12 @@ interface IPoolManager {
         bytes32 salt;
     }
 
+    struct SwapParams {
+        bool zeroForOne;
+        int256 amountSpecified;
+        uint160 sqrtPriceLimitX96;
+    }
+
     function initialize(PoolKey memory key, uint160 sqrtPriceX96) external returns (int24 tick);
     function unlock(bytes calldata data) external returns (bytes memory);
     function modifyLiquidity(
@@ -39,9 +45,15 @@ interface IPoolManager {
         ModifyLiquidityParams memory params,
         bytes calldata hookData
     ) external returns (int256 callerDelta, int256 feesAccrued);
+    function swap(
+        PoolKey memory key,
+        SwapParams memory params,
+        bytes calldata hookData
+    ) external returns (int256 delta);
     function sync(address currency) external;
     function take(address currency, address to, uint256 amount) external;
     function settle() external payable returns (uint256 paid);
+    function extsload(bytes32 slot) external view returns (bytes32 value);
 }
 
 interface IUnlockCallback {
@@ -62,4 +74,3 @@ interface IPositionManager {
 
     function mint(MintParams calldata params) external payable returns (uint256 tokenId, uint128 amount0, uint128 amount1);
 }
-
