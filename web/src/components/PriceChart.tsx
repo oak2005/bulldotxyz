@@ -2,7 +2,10 @@
 
 import React, { useState, useMemo } from 'react';
 import { TrendingUp, TrendingDown } from 'lucide-react';
+import { motion } from 'framer-motion';
 import { PricePoint } from '../context/ProtocolContext';
+import { SpotlightCard, snappySpring } from './MotionPrimitives';
+import { TokenEmblem } from './BrandAssets';
 
 interface PriceChartProps {
   tokenSymbol: string;
@@ -28,7 +31,7 @@ export function PriceChart({
   isGraduated,
 }: PriceChartProps) {
   const [timeframe, setTimeframe] = useState<Timeframe>('24H');
-  const [displayMode, setDisplayMode] = useState<'STOCK' | 'USD'>('USD');
+  const [displayMode, setDisplayMode] = useState<'USD' | 'STOCK'>('USD');
   const [hoveredPoint, setHoveredPoint] = useState<{
     x: number;
     y: number;
@@ -61,10 +64,10 @@ export function PriceChart({
   const maxPrice = Math.max(...activePrices);
   const priceRange = maxPrice - minPrice;
 
-  const width = 500;
-  const height = 180;
+  const width = 560;
+  const height = 200;
   const paddingX = 10;
-  const paddingY = 20;
+  const paddingY = 22;
 
   const points = activePrices.map((price, idx) => {
     const x = paddingX + (idx / Math.max(1, activePrices.length - 1)) * (width - 2 * paddingX);
@@ -80,118 +83,132 @@ export function PriceChart({
   }, '');
 
   const areaD = `${pathD} L ${points[points.length - 1].x} ${height} L ${points[0].x} ${height} Z`;
-
   const volumeUsd = volumeB20 * stockPriceUsd;
 
   return (
-    <div className="bg-surface border border-border rounded-2xl p-5 shadow-xl space-y-4">
-      {/* Header: Token pair & Dual price headline */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <div className="flex items-center space-x-2 text-xs text-gray-400">
-            <span className="font-bold text-white text-base">
-              ${tokenSymbol} / {stockSymbol}
-            </span>
-            <span className="px-2 py-0.5 rounded-full text-[10px] bg-primary/20 text-primary border border-primary/40 font-semibold">
-              {isGraduated ? 'v4 Pool Live' : 'On-Chain Curve'}
-            </span>
-          </div>
+    <SpotlightCard className="p-5 sm:p-6 space-y-5">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+        <div className="flex items-start space-x-3">
+          <TokenEmblem symbol={tokenSymbol} size="md" />
+          <div>
+            <div className="flex items-center space-x-2">
+              <h2 className="font-display font-semibold text-white text-lg tracking-tight">
+                ${tokenSymbol} <span className="text-muted font-normal">/ {stockSymbol}</span>
+              </h2>
+              <span className="px-2 py-0.5 rounded-md text-[10px] font-mono uppercase tracking-micro bg-[#00E599]/10 text-[#00E599] border border-[#00E599]/30">
+                {isGraduated ? 'v4 Pool Live' : 'On-Chain Curve'}
+              </span>
+            </div>
 
-          <div className="flex items-baseline space-x-2 mt-1">
-            <span className="text-2xl font-extrabold text-white">
-              {displayMode === 'USD'
-                ? `$${currentPrice.toFixed(8)}`
-                : `${currentPrice.toFixed(10)} ${stockSymbol}`}
-            </span>
-            <span
-              className={`text-xs font-semibold flex items-center ${
-                isPositive ? 'text-success' : 'text-danger'
-              }`}
-            >
-              {isPositive ? (
-                <TrendingUp className="w-3.5 h-3.5 mr-0.5" />
+            <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1 mt-1">
+              <span className="font-mono text-xl sm:text-[26px] font-semibold text-white tabular-nums tracking-tight break-all">
+                {displayMode === 'USD'
+                  ? `$${currentPrice.toFixed(8)}`
+                  : `${currentPrice.toFixed(10)} ${stockSymbol}`}
+              </span>
+              <span
+                className={`text-xs font-mono font-medium flex items-center tabular-nums ${
+                  isPositive ? 'text-[#00E599]' : 'text-red-400'
+                }`}
+              >
+                {isPositive ? (
+                  <TrendingUp className="w-3.5 h-3.5 mr-1" strokeWidth={1.75} />
+                ) : (
+                  <TrendingDown className="w-3.5 h-3.5 mr-1" strokeWidth={1.75} />
+                )}
+                {isPositive ? '+' : ''}
+                {priceChange.toFixed(2)}%
+              </span>
+            </div>
+
+            <div className="font-mono text-[11px] text-muted mt-0.5 tabular-nums">
+              {displayMode === 'USD' ? (
+                <span>
+                  1 {tokenSymbol} ≈{' '}
+                  {(stockPriceUsd * multiplier > 0
+                    ? currentPrice / (stockPriceUsd * multiplier)
+                    : 0
+                  ).toFixed(10)}{' '}
+                  {stockSymbol}
+                </span>
               ) : (
-                <TrendingDown className="w-3.5 h-3.5 mr-0.5" />
+                <span>
+                  1 {tokenSymbol} ≈ ${(currentPrice * stockPriceUsd * multiplier).toFixed(8)} USD
+                </span>
               )}
-              {isPositive ? '+' : ''}
-              {priceChange.toFixed(2)}%
-            </span>
-          </div>
-
-          <div className="text-[11px] text-gray-400 mt-0.5">
-            {displayMode === 'USD' ? (
-              <span>
-                1 {tokenSymbol} ≈{' '}
-                {(stockPriceUsd * multiplier > 0
-                  ? currentPrice / (stockPriceUsd * multiplier)
-                  : 0
-                ).toFixed(10)}{' '}
-                {stockSymbol}
-              </span>
-            ) : (
-              <span>
-                1 {tokenSymbol} ≈ ${(currentPrice * stockPriceUsd * multiplier).toFixed(8)} USD
-              </span>
-            )}
+            </div>
           </div>
         </div>
 
-        {/* Controls: Display Mode & Timeframe */}
-        <div className="flex items-center space-x-2">
-          <div className="flex bg-background border border-border rounded-lg p-0.5 text-xs">
-            <button
-              onClick={() => setDisplayMode('USD')}
-              className={`px-2 py-1 rounded-md font-medium transition-all ${
-                displayMode === 'USD'
-                  ? 'bg-primary text-white shadow-sm'
-                  : 'text-gray-400 hover:text-white'
-              }`}
-              title="Show prices in USD"
-            >
-              USD ($)
-            </button>
-            <button
-              onClick={() => setDisplayMode('STOCK')}
-              className={`px-2 py-1 rounded-md font-medium transition-all ${
-                displayMode === 'STOCK'
-                  ? 'bg-primary text-white shadow-sm'
-                  : 'text-gray-400 hover:text-white'
-              }`}
-              title={`Show prices in ${stockSymbol}`}
-            >
-              {stockSymbol}
-            </button>
+        {/* Display Unit & Timeframe Switchers */}
+        <div className="flex items-center space-x-2 self-start">
+          <div className="flex bg-[#080B10] border border-white/[0.08] rounded-lg p-0.5 text-[11px]">
+            {(['USD', 'STOCK'] as const).map((mode) => {
+              const active = displayMode === mode;
+              return (
+                <button
+                  key={mode}
+                  onClick={() => setDisplayMode(mode)}
+                  className={`relative px-2.5 py-1 rounded-md font-medium transition-colors ${
+                    active ? 'text-white' : 'text-muted hover:text-ink'
+                  }`}
+                >
+                  {active && (
+                    <motion.span
+                      layoutId="chart-unit-pill"
+                      transition={snappySpring}
+                      className="absolute inset-0 rounded-md bg-[#0052FF]"
+                    />
+                  )}
+                  <span className="relative z-10">{mode === 'USD' ? 'USD' : stockSymbol}</span>
+                </button>
+              );
+            })}
           </div>
 
-          <div className="flex bg-background border border-border rounded-lg p-0.5 text-xs">
-            {(['1H', '24H', '7D', 'ALL'] as Timeframe[]).map((tf) => (
-              <button
-                key={tf}
-                onClick={() => setTimeframe(tf)}
-                className={`px-2 py-1 rounded-md font-medium transition-all ${
-                  timeframe === tf
-                    ? 'bg-surface-hover text-white shadow-sm'
-                    : 'text-gray-400 hover:text-white'
-                }`}
-              >
-                {tf}
-              </button>
-            ))}
+          <div className="flex bg-[#080B10] border border-white/[0.08] rounded-lg p-0.5 text-[11px] font-mono">
+            {(['1H', '24H', '7D', 'ALL'] as Timeframe[]).map((tf) => {
+              const active = timeframe === tf;
+              return (
+                <button
+                  key={tf}
+                  onClick={() => setTimeframe(tf)}
+                  className={`relative px-2 py-1 rounded-md transition-colors ${
+                    active ? 'text-white' : 'text-muted hover:text-ink'
+                  }`}
+                >
+                  {active && (
+                    <motion.span
+                      layoutId="chart-tf-pill"
+                      transition={snappySpring}
+                      className="absolute inset-0 rounded-md bg-[#192331]"
+                    />
+                  )}
+                  <span className="relative z-10">{tf}</span>
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
 
-      {/* SVG Chart Graphic */}
-      <div className="relative w-full h-[180px] select-none">
+      {/* Interactive SVG Canvas */}
+      <div className="relative w-full h-[200px] select-none">
         <svg
           viewBox={`0 0 ${width} ${height}`}
           className="w-full h-full overflow-visible"
           onMouseLeave={() => setHoveredPoint(null)}
         >
           <defs>
-            <linearGradient id="priceGradient" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#3B82F6" stopOpacity="0.35" />
-              <stop offset="100%" stopColor="#3B82F6" stopOpacity="0.0" />
+            <linearGradient id="bullStrokeGrad" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor="#0052FF" />
+              <stop offset="100%" stopColor="#00E599" />
+            </linearGradient>
+            <linearGradient id="bullFillGrad" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#00E599" stopOpacity="0.24" />
+              <stop offset="55%" stopColor="#0052FF" stopOpacity="0.08" />
+              <stop offset="100%" stopColor="#080B10" stopOpacity="0" />
             </linearGradient>
           </defs>
 
@@ -200,32 +217,32 @@ export function PriceChart({
             y1={paddingY}
             x2={width}
             y2={paddingY}
-            stroke="rgba(255,255,255,0.06)"
-            strokeDasharray="3 3"
+            stroke="rgba(255,255,255,0.05)"
+            strokeDasharray="3 4"
           />
           <line
             x1="0"
             y1={height / 2}
             x2={width}
             y2={height / 2}
-            stroke="rgba(255,255,255,0.06)"
-            strokeDasharray="3 3"
+            stroke="rgba(255,255,255,0.05)"
+            strokeDasharray="3 4"
           />
           <line
             x1="0"
             y1={height - paddingY}
             x2={width}
             y2={height - paddingY}
-            stroke="rgba(255,255,255,0.06)"
-            strokeDasharray="3 3"
+            stroke="rgba(255,255,255,0.05)"
+            strokeDasharray="3 4"
           />
 
-          <path d={areaD} fill="url(#priceGradient)" />
+          <path d={areaD} fill="url(#bullFillGrad)" />
           <path
             d={pathD}
             fill="none"
-            stroke="#3B82F6"
-            strokeWidth="2.5"
+            stroke="url(#bullStrokeGrad)"
+            strokeWidth="2.4"
             strokeLinecap="round"
             strokeLinejoin="round"
           />
@@ -237,16 +254,16 @@ export function PriceChart({
                 y1={0}
                 x2={hoveredPoint.x}
                 y2={height}
-                stroke="#60A5FA"
+                stroke="rgba(0, 229, 153, 0.45)"
                 strokeWidth="1"
-                strokeDasharray="2 2"
+                strokeDasharray="3 3"
               />
               <circle
                 cx={hoveredPoint.x}
                 cy={hoveredPoint.y}
                 r="4.5"
-                fill="#3B82F6"
-                stroke="#FFFFFF"
+                fill="#00E599"
+                stroke="#080B10"
                 strokeWidth="2"
               />
             </>
@@ -268,40 +285,42 @@ export function PriceChart({
 
         {hoveredPoint && (
           <div
-            className="absolute -top-3 pointer-events-none transform -translate-x-1/2 bg-background border border-primary/50 text-white rounded-lg px-2.5 py-1 text-[11px] shadow-lg shadow-black/60 z-20"
-            style={{ left: `${(hoveredPoint.x / width) * 100}%` }}
+            className="absolute -top-3 pointer-events-none transform -translate-x-1/2 bg-[#080B10] border border-[#00E599]/45 text-white rounded-lg px-2.5 py-1 text-[11px] font-mono shadow-xl z-20 whitespace-nowrap"
+            style={{
+              left: `clamp(64px, ${(hoveredPoint.x / width) * 100}%, calc(100% - 64px))`,
+            }}
           >
-            <div className="font-bold">
+            <div className="font-semibold text-[#00E599] tabular-nums">
               {displayMode === 'USD'
                 ? `$${hoveredPoint.price.toFixed(8)}`
                 : `${hoveredPoint.price.toFixed(10)} ${stockSymbol}`}
             </div>
-            <div className="text-[10px] text-gray-400">{hoveredPoint.time}</div>
+            <div className="text-[10px] text-muted">{hoveredPoint.time}</div>
           </div>
         )}
       </div>
 
-      {/* On-Chain Metrics Ticker */}
-      <div className="grid grid-cols-3 gap-2 pt-3 border-t border-border/80 text-center text-xs">
+      {/* Metrics Footer */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 pt-4 border-t border-white/[0.07] text-xs">
         <div>
-          <span className="text-[11px] text-gray-400 block">Period High</span>
-          <span className="font-semibold text-gray-200">
+          <span className="text-[10px] uppercase tracking-micro text-muted block">Period High</span>
+          <span className="font-mono font-medium text-ink tabular-nums mt-0.5 block truncate">
             {displayMode === 'USD' ? `$${maxPrice.toFixed(8)}` : `${maxPrice.toFixed(10)}`}
           </span>
         </div>
-        <div>
-          <span className="text-[11px] text-gray-400 block">Period Low</span>
-          <span className="font-semibold text-gray-200">
+        <div className="text-right sm:text-center">
+          <span className="text-[10px] uppercase tracking-micro text-muted block">Period Low</span>
+          <span className="font-mono font-medium text-ink tabular-nums mt-0.5 block truncate">
             {displayMode === 'USD' ? `$${minPrice.toFixed(8)}` : `${minPrice.toFixed(10)}`}
           </span>
         </div>
-        <div>
-          <span className="text-[11px] text-gray-400 block">On-Chain Volume</span>
-          <span className="font-semibold text-primary">
-            {volumeB20.toFixed(2)} {stockSymbol} (~${volumeUsd.toFixed(2)})
+        <div className="col-span-2 sm:col-span-1 sm:text-right">
+          <span className="text-[10px] uppercase tracking-micro text-muted block">On-Chain Volume</span>
+          <span className="font-mono font-medium text-[#00E599] tabular-nums mt-0.5 block">
+            {volumeB20.toFixed(2)} {stockSymbol} (${volumeUsd.toFixed(2)})
           </span>
         </div>
       </div>
-    </div>
+    </SpotlightCard>
   );
 }

@@ -3,9 +3,25 @@
 import React, { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { VERIFIED_B20_STOCKS, B20StockMetadata } from '../config/stocks';
+import { motion } from 'framer-motion';
+import { VERIFIED_B20_STOCKS } from '../config/stocks';
+import { CONTRACT_CONFIGS } from '../config/contracts';
 import { PriceChart } from '../components/PriceChart';
 import { LiquidityViewer } from '../components/LiquidityViewer';
+import { OnboardingGuide } from '../components/OnboardingGuide';
+import {
+  BaseNetworkMark,
+  UniswapMark,
+  StockEquityBadge,
+  TokenEmblem,
+} from '../components/BrandAssets';
+import {
+  SpotlightCard,
+  TactileButton,
+  TactileLink,
+  Reveal,
+  snappySpring,
+} from '../components/MotionPrimitives';
 import {
   ArrowDownUp,
   AlertCircle,
@@ -19,10 +35,9 @@ import {
   Flame,
   Rocket,
   Pause,
-  Wallet,
-  Layers,
-  Building2,
+  BookOpen,
   ArrowRight,
+  Lock,
 } from 'lucide-react';
 import { useAccount, useSwitchChain } from 'wagmi';
 import { baseSepolia } from 'wagmi/chains';
@@ -50,11 +65,9 @@ function SwapContent() {
     setIsFaucetOpen,
   } = useProtocol();
 
-  // Active pair selection (supports matching by contract address or ticker symbol)
   const requestedPair = searchParams.get('pair');
   const [activeToken, setActiveToken] = useState<TokenPair | null>(null);
 
-  // Keep activeToken in sync with live on-chain communityTokens
   useEffect(() => {
     if (requestedPair && communityTokens.length > 0) {
       const match = communityTokens.find(
@@ -95,16 +108,14 @@ function SwapContent() {
   const [customSlippage, setCustomSlippage] = useState('');
   const [showSettings, setShowSettings] = useState(false);
 
-  // Live on-chain quote state from BulldotRouter
   const [onChainQuote, setOnChainQuote] = useState<SwapQuoteResult | null>(null);
   const [isQuoting, setIsQuoting] = useState(false);
 
-  // Execution states
   const [txState, setTxState] = useState<'IDLE' | 'APPROVING' | 'SWAPPING' | 'CONFIRMED'>('IDLE');
   const [lastTxHash, setLastTxHash] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const mockMultiplier = 1.0; // 1 Token = 1 Share unless split updated on-chain
+  const mockMultiplier = 1.0;
   const parsedFrom = parseFloat(fromAmount) || 0;
   const effectiveSlippage = customSlippage ? parseFloat(customSlippage) || 1.0 : parseFloat(slippage);
   const isEthPoolSeeded = Boolean(ethStockPoolReady[activeStock.symbol]);
@@ -145,7 +156,6 @@ function SwapContent() {
     };
   }, [activeToken?.tokenAddress, activeToken?.b20Reserve, activeStock.symbol, fromAmount, parsedFrom, isTokenToStock, useEthRoute, isEthPoolSeeded]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Balances & Active Assets
   const stockBalance = stockBalances[activeStock.symbol] || 0;
   const tokenBalance = (activeToken && tokenBalances[activeToken.symbol]) || 0;
   const baseAssetBalance = useEthRoute ? ethBalance : stockBalance;
@@ -158,26 +168,23 @@ function SwapContent() {
   const rawToAmount = onChainQuote ? onChainQuote.amountOut : 0;
   const intermediateStockOut = onChainQuote ? onChainQuote.intermediateStockOut : 0;
 
-  const outputDecimals = isTokenToStock ? (useEthRoute ? 6 : 6) : 0;
   const formattedToAmount = isQuoting
     ? '...'
     : isTokenToStock
-    ? rawToAmount.toFixed(outputDecimals)
+    ? rawToAmount.toFixed(6)
     : Math.floor(rawToAmount).toLocaleString();
 
   const minReceived = (rawToAmount * (1 - effectiveSlippage / 100)).toLocaleString(undefined, {
-    maximumFractionDigits: isTokenToStock ? outputDecimals : 0,
+    maximumFractionDigits: isTokenToStock ? 6 : 0,
   });
 
   const priceImpact = onChainQuote ? (onChainQuote.priceImpactBps / 100).toFixed(2) : '0.00';
   const numericPriceImpact = parseFloat(priceImpact);
 
-  // Fees from on-chain quote
   const creatorFeePercent = (activeToken?.creatorFeeBps || 100) / 100;
   const poolFeePercent = activeToken?.isGraduated || useEthRoute ? 0.3 : 0.0;
   const estimatedFeeB20 = onChainQuote ? onChainQuote.fee.toFixed(6) : '0.0000';
 
-  // Anti-sniper max-wallet guard (prevents predictable reverted txs)
   const exceedsMaxWallet = Boolean(
     !isTokenToStock &&
       activeToken &&
@@ -186,7 +193,6 @@ function SwapContent() {
       tokenBalance + rawToAmount > (activeToken.maxWalletTokens || 0)
   );
 
-  // Token USD equivalent
   const stockUsd = activeToken?.stockPriceUsd || activeStock.referencePriceUsd;
   const tokenPriceUsd = rate > 0 ? (stockUsd / rate).toFixed(8) : '0.00000000';
 
@@ -249,57 +255,179 @@ function SwapContent() {
   };
 
   const explorerUrl = isSepolia ? 'https://sepolia.basescan.org' : 'https://basescan.org';
+  const sepoliaConfig = CONTRACT_CONFIGS[baseSepolia.id];
+  const readyEthPoolsCount = Object.values(ethStockPoolReady).filter(Boolean).length;
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
-      {/* Header Headline */}
-      <div className="text-center">
-        <h1 className="text-3xl font-extrabold text-white tracking-tight">
-          Decentralized Exchange on Base
-        </h1>
-        <p className="text-sm text-gray-400 mt-1">
-          Instant swaps backed by Coinbase Tokenized Equities and permanent Uniswap v4 liquidity.
-        </p>
-      </div>
+    <div className="space-y-8">
+      {/* Interactive Onboarding Bar (live state-driven) */}
+      <OnboardingGuide />
 
       {isLoadingPools && communityTokens.length === 0 ? (
-        <div className="bg-surface border border-border rounded-2xl p-10 text-center space-y-3 max-w-xl mx-auto">
-          <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="text-xs text-gray-400">Syncing live pools & contracts from Base Sepolia...</p>
-        </div>
+        <SpotlightCard outerClassName="max-w-2xl mx-auto" className="p-12 text-center space-y-4">
+          <div className="w-8 h-8 border-2 border-[#00E599] border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="text-xs font-mono text-muted">
+            Reading live pools and Uniswap v4 reserves from Base Sepolia...
+          </p>
+        </SpotlightCard>
       ) : communityTokens.length === 0 ? (
-        /* Zero State: No tokens deployed yet */
-        <div className="bg-surface border border-border rounded-2xl p-8 sm:p-10 text-center space-y-5 max-w-xl mx-auto shadow-2xl animate-fadeIn">
-          <div className="w-16 h-16 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary text-3xl mx-auto">
-            🚀
-          </div>
-          <div className="space-y-1.5">
-            <h2 className="text-xl font-bold text-white">0 Pools Active on Base Sepolia</h2>
-            <p className="text-xs text-gray-400 max-w-md mx-auto leading-relaxed">
-              All starting curves and pools are clean and zeroed out for live testing. Deploy the first community token paired with verified Coinbase tokenized equities to initiate on-chain trading!
-            </p>
-          </div>
-          <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
-            <Link
-              href="/launch"
-              className="w-full sm:w-auto px-6 py-3 bg-primary hover:bg-primary-hover text-white rounded-xl font-bold text-xs transition-all shadow-lg shadow-primary/20 flex items-center justify-center space-x-2"
+        /* Asymmetric Editorial Hero (60% Left / 40% Right Interactive Card) when 0 Pools deployed */
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+          <Reveal className="lg:col-span-7 flex flex-col justify-between p-6 sm:p-8 rounded-2xl border border-white/[0.08] bg-[#0E141C]/80 space-y-6">
+            <div className="space-y-5">
+              <div className="flex flex-wrap items-center gap-2.5">
+                <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg text-[10px] font-mono uppercase tracking-micro bg-[#0052FF]/15 text-[#7CA8FF] border border-[#0052FF]/35">
+                  <BaseNetworkMark size={12} />
+                  <span>Built on Base Sepolia • 84532</span>
+                </span>
+                <span className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg text-[10px] font-mono uppercase tracking-micro bg-[#00E599]/10 text-[#00E599] border border-[#00E599]/30">
+                  <UniswapMark size={12} />
+                  <span>Uniswap v4 PoolManager</span>
+                </span>
+              </div>
+
+              <h1
+                className="font-display font-semibold text-white tracking-display leading-[1.04]"
+                style={{ fontSize: 'clamp(2.25rem, 1.5rem + 3vw, 3.6rem)' }}
+              >
+                Equity-backed markets,{' '}
+                <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#5C93FF] via-[#7CA8FF] to-[#00E599]">
+                  liquid from block zero.
+                </span>
+              </h1>
+
+              <p className="text-sm sm:text-base text-muted max-w-xl leading-relaxed">
+                Launch fair community tokens paired exclusively with Coinbase B20 tokenized stocks. Buy or sell atomically via Native ETH or B20 shares, with every pool locking permanently in Uniswap v4.
+              </p>
+            </div>
+
+            <div className="space-y-5 pt-2">
+              <div className="flex flex-wrap items-center gap-3">
+                <TactileLink href="/launch" variant="emerald" className="px-5 py-3 text-xs space-x-2">
+                  <Rocket className="w-4 h-4" strokeWidth={1.75} />
+                  <span>Launch First Token Pool</span>
+                </TactileLink>
+                <TactileButton
+                  variant="secondary"
+                  onClick={() => setIsFaucetOpen(true)}
+                  className="px-4 py-3 text-xs space-x-2"
+                >
+                  <Droplets className="w-4 h-4 text-[#00E599]" strokeWidth={1.6} />
+                  <span>Claim Testnet Equities</span>
+                </TactileButton>
+                <TactileLink href="/docs" variant="secondary" className="px-4 py-3 text-xs space-x-1.5">
+                  <BookOpen className="w-4 h-4 text-[#7CA8FF]" strokeWidth={1.6} />
+                  <span>Protocol Docs</span>
+                </TactileLink>
+              </div>
+
+              <div className="pt-4 border-t border-white/[0.07] grid grid-cols-2 sm:grid-cols-3 gap-3 sm:gap-4 text-xs">
+                <div>
+                  <span className="text-[10px] uppercase tracking-micro text-muted block">
+                    ETH / B20 Pools
+                  </span>
+                  <span className="font-mono text-sm sm:text-base font-semibold text-[#00E599] tabular-nums mt-0.5 block">
+                    {readyEthPoolsCount}/4 Seeded
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[10px] uppercase tracking-micro text-muted block">
+                    Active Curves
+                  </span>
+                  <span className="font-mono text-sm sm:text-base font-semibold text-white tabular-nums mt-0.5 block">
+                    0 (Testnet Live)
+                  </span>
+                </div>
+                <div className="col-span-2 sm:col-span-1">
+                  <span className="text-[10px] uppercase tracking-micro text-muted block">
+                    Treasury Cap
+                  </span>
+                  <span className="font-mono text-sm sm:text-base font-semibold text-[#7CA8FF] tabular-nums mt-0.5 block">
+                    0.10% Max
+                  </span>
+                </div>
+              </div>
+            </div>
+          </Reveal>
+
+          {/* Right Column (40%): Interactive Live On-Chain Readiness Card */}
+          <Reveal delay={0.08} className="lg:col-span-5">
+            <SpotlightCard
+              accent="emerald"
+              outerClassName="h-full"
+              className="p-6 flex flex-col justify-between space-y-5"
             >
-              <Rocket className="w-4 h-4" />
-              <span>Launch First Token on Base Sepolia</span>
-            </Link>
-            <button
-              onClick={() => setIsFaucetOpen(true)}
-              className="w-full sm:w-auto px-5 py-3 bg-emerald-950/60 hover:bg-emerald-900/60 border border-emerald-800 text-emerald-300 rounded-xl font-semibold text-xs transition-colors flex items-center justify-center space-x-1.5"
-            >
-              <Droplets className="w-4 h-4 text-emerald-400" />
-              <span>Claim Free Testnet Stocks</span>
-            </button>
-          </div>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-[10px] uppercase tracking-micro text-[#00E599]">
+                    Live Testnet State
+                  </span>
+                  <span className="inline-flex items-center space-x-1.5 text-[11px] font-mono text-ink">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#00E599] animate-pulse" />
+                    <span>RPC Connected</span>
+                  </span>
+                </div>
+
+                <div>
+                  <h2 className="font-display text-xl font-semibold text-white tracking-tight">
+                    Ready for First On-Chain Launch
+                  </h2>
+                  <p className="text-xs text-muted mt-1 leading-relaxed">
+                    Every deployed curve is readable across all browsers and mobile wallets immediately via <span className="font-mono text-ink">BulldotFactory</span>.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  {VERIFIED_B20_STOCKS.map((stock) => {
+                    const ready = ethStockPoolReady[stock.symbol];
+                    return (
+                      <div
+                        key={stock.symbol}
+                        className="p-2.5 rounded-xl bg-[#080B10]/80 border border-white/[0.06] flex items-center justify-between text-xs"
+                      >
+                        <div className="flex items-center space-x-2.5">
+                          <StockEquityBadge symbol={stock.symbol} size="sm" />
+                          <div>
+                            <div className="font-medium text-white">{stock.symbol}</div>
+                            <div className="text-[10px] text-muted">{stock.name}</div>
+                          </div>
+                        </div>
+                        <span
+                          className={`font-mono text-[10px] px-2 py-0.5 rounded-md border ${
+                            ready
+                              ? 'bg-[#00E599]/10 text-[#00E599] border-[#00E599]/30'
+                              : 'bg-white/[0.04] text-muted border-white/[0.08]'
+                          }`}
+                        >
+                          {ready ? 'v4 ETH Ready' : 'Stock Pair'}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="pt-3 border-t border-white/[0.07] flex items-center justify-between text-[11px] font-mono">
+                <span className="text-muted">Router Contract</span>
+                <a
+                  href={`${explorerUrl}/address/${sepoliaConfig.router}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[#7CA8FF] hover:text-white flex items-center space-x-1"
+                >
+                  <span>
+                    {sepoliaConfig.router.slice(0, 6)}...{sepoliaConfig.router.slice(-4)}
+                  </span>
+                  <ExternalLink className="w-3 h-3" strokeWidth={1.6} />
+                </a>
+              </div>
+            </SpotlightCard>
+          </Reveal>
         </div>
       ) : activeToken ? (
-        /* Main Grid: Price Chart (Left/Top) & Swap Box (Right) */
+        /* Live DEX Grid: 7 Cols Chart + Pair Selector / 5 Cols Swap & Liquidity Terminal */
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-          {/* Left Column: Interactive Price History Chart */}
+          {/* Left Column */}
           <div className="lg:col-span-7 space-y-4">
             <PriceChart
               tokenSymbol={activeToken.symbol}
@@ -312,167 +440,183 @@ function SwapContent() {
               isGraduated={activeToken.isGraduated}
             />
 
-            {/* Quick Token Selector Pills */}
-            <div className="bg-surface border border-border rounded-xl p-3 flex items-center justify-between">
-              <span className="text-xs text-gray-400 font-medium">Select Community Token:</span>
+            {/* Quick Pair Selector Strip */}
+            <div className="bg-[#0E141C] border border-white/[0.08] rounded-xl p-3 flex items-center justify-between gap-3">
+              <span className="text-[11px] uppercase tracking-micro text-muted font-medium whitespace-nowrap">
+                Active Pairs
+              </span>
               <div className="flex items-center space-x-1.5 overflow-x-auto">
-                {communityTokens.map((token) => (
-                  <button
-                    key={token.tokenAddress}
-                    onClick={() => setActiveToken(token)}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all whitespace-nowrap ${
-                      activeToken.tokenAddress === token.tokenAddress
-                        ? 'bg-primary text-white shadow-md'
-                        : 'bg-background text-gray-400 hover:text-white border border-border'
-                    }`}
-                  >
-                    ${token.symbol}
-                  </button>
-                ))}
+                {communityTokens.map((token) => {
+                  const selected = activeToken.tokenAddress === token.tokenAddress;
+                  return (
+                    <button
+                      key={token.tokenAddress}
+                      onClick={() => setActiveToken(token)}
+                      className={`relative px-3 py-1 rounded-lg text-xs font-mono font-medium transition-colors whitespace-nowrap ${
+                        selected ? 'text-white' : 'text-muted hover:text-ink'
+                      }`}
+                    >
+                      {selected && (
+                        <motion.span
+                          layoutId="pair-selector-pill"
+                          transition={snappySpring}
+                          className="absolute inset-0 rounded-lg bg-[#0052FF]"
+                        />
+                      )}
+                      <span className="relative z-10">${token.symbol}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>
 
-          {/* Right Column: Trading & Liquidity Container */}
-          <div className="lg:col-span-5 space-y-4">
-            {/* Card Mode Tabs: Swap vs Liquidity Depth */}
-            <div className="flex bg-surface border border-border rounded-xl p-1 text-xs">
-              <button
-                onClick={() => setActiveTab('SWAP')}
-                className={`flex-1 py-2 rounded-lg font-semibold transition-all flex items-center justify-center space-x-1.5 ${
-                  activeTab === 'SWAP'
-                    ? 'bg-primary text-white shadow-md'
-                    : 'text-gray-400 hover:text-white'
-                }`}
-              >
-                <ArrowRightLeft className="w-3.5 h-3.5" />
-                <span>Instant Swap</span>
-              </button>
-
-              <button
-                onClick={() => setActiveTab('LIQUIDITY')}
-                className={`flex-1 py-2 rounded-lg font-semibold transition-all flex items-center justify-center space-x-1.5 ${
-                  activeTab === 'LIQUIDITY'
-                    ? 'bg-primary text-white shadow-md'
-                    : 'text-gray-400 hover:text-white'
-                }`}
-              >
-                <Droplets className="w-3.5 h-3.5" />
-                <span>Pool Liquidity</span>
-              </button>
+          {/* Right Column: Swap & Pool Terminal */}
+          <div className="lg:col-span-5 space-y-3">
+            {/* Swap vs Liquidity Tabs */}
+            <div className="flex bg-[#0E141C] border border-white/[0.08] rounded-xl p-1 text-xs">
+              {(['SWAP', 'LIQUIDITY'] as const).map((tab) => {
+                const active = activeTab === tab;
+                const Icon = tab === 'SWAP' ? ArrowRightLeft : Droplets;
+                return (
+                  <button
+                    key={tab}
+                    onClick={() => setActiveTab(tab)}
+                    className={`relative flex-1 py-2 rounded-lg font-medium transition-colors flex items-center justify-center space-x-1.5 ${
+                      active ? 'text-white' : 'text-muted hover:text-ink'
+                    }`}
+                  >
+                    {active && (
+                      <motion.span
+                        layoutId="terminal-tab-pill"
+                        transition={snappySpring}
+                        className="absolute inset-0 rounded-lg bg-[#162030] border border-[#0052FF]/45"
+                      />
+                    )}
+                    <Icon
+                      className={`relative z-10 w-3.5 h-3.5 ${
+                        active ? 'text-[#00E599]' : 'text-muted'
+                      }`}
+                      strokeWidth={1.6}
+                    />
+                    <span className="relative z-10">
+                      {tab === 'SWAP' ? 'Instant Swap' : 'Pool Liquidity'}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
 
             {activeTab === 'SWAP' ? (
-              /* Swap Card */
-              <div className="bg-surface border border-border rounded-2xl p-5 shadow-xl space-y-4">
-                {/* Header: Status & Settings */}
+              <SpotlightCard className="p-5 space-y-4">
+                {/* Card Status + Slippage */}
                 <div className="flex justify-between items-center text-xs">
-                  <div className="flex items-center space-x-1.5">
+                  <div>
                     {activeToken.isGraduated ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-green-950/60 text-green-300 border border-green-800">
-                        <Flame className="w-3 h-3" />
-                        Uniswap v4 Native
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[10px] font-mono uppercase tracking-micro bg-[#00E599]/10 text-[#00E599] border border-[#00E599]/30">
+                        <Flame className="w-3 h-3" strokeWidth={1.75} />
+                        Uniswap v4 Pool
                       </span>
                     ) : (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-950/60 text-blue-300 border border-blue-800">
-                        <Rocket className="w-3 h-3" />
-                        Bonding Curve Active
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-md text-[10px] font-mono uppercase tracking-micro bg-[#0052FF]/15 text-[#7CA8FF] border border-[#0052FF]/35">
+                        <Rocket className="w-3 h-3" strokeWidth={1.75} />
+                        Bonding Curve
                       </span>
                     )}
                   </div>
 
                   <button
                     onClick={() => setShowSettings(!showSettings)}
-                    className="flex items-center space-x-1 text-gray-400 hover:text-white transition-colors p-1 rounded-md hover:bg-background"
-                    title="Slippage settings"
+                    className="flex items-center space-x-1.5 text-muted hover:text-white transition-colors px-2 py-1 rounded-lg hover:bg-white/[0.04] font-mono text-[11px]"
                   >
-                    <Settings className="w-3.5 h-3.5" />
-                    <span>{effectiveSlippage}% Slippage</span>
+                    <Settings className="w-3.5 h-3.5" strokeWidth={1.6} />
+                    <span>{effectiveSlippage}%</span>
                   </button>
                 </div>
 
-                {/* Settlement Route Selector: Native ETH (2-Hop via Stock) vs Direct B20 Stock */}
-                <div className="bg-background border border-border rounded-xl p-1 grid grid-cols-2 gap-1 text-[11px]">
-                  <button
-                    type="button"
-                    onClick={() => handleToggleRoute(true)}
-                    className={`py-1.5 px-2 rounded-lg font-semibold transition-all flex items-center justify-center space-x-1 ${
-                      useEthRoute
-                        ? 'bg-primary text-white shadow-sm'
-                        : 'text-gray-400 hover:text-white'
-                    }`}
-                  >
-                    <span>ETH &rarr; {activeStock.symbol} &rarr; Token</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleToggleRoute(false)}
-                    className={`py-1.5 px-2 rounded-lg font-semibold transition-all flex items-center justify-center space-x-1 ${
-                      !useEthRoute
-                        ? 'bg-surface-hover text-white border border-border shadow-sm'
-                        : 'text-gray-400 hover:text-white'
-                    }`}
-                  >
-                    <span>Direct {activeStock.symbol}</span>
-                  </button>
+                {/* Settlement Route Toggle (2-Hop ETH vs Direct Stock) */}
+                <div className="bg-[#080B10] border border-white/[0.08] rounded-xl p-1 grid grid-cols-2 gap-1 text-[10px] sm:text-[11px]">
+                  {[
+                    { useEth: true, label: `ETH → ${activeStock.symbol} → Token` },
+                    { useEth: false, label: `Direct ${activeStock.symbol}` },
+                  ].map((opt) => {
+                    const active = useEthRoute === opt.useEth;
+                    return (
+                      <button
+                        key={String(opt.useEth)}
+                        type="button"
+                        onClick={() => handleToggleRoute(opt.useEth)}
+                        className={`relative py-1.5 px-1.5 sm:px-2 rounded-lg font-medium transition-colors truncate ${
+                          active ? 'text-white' : 'text-muted hover:text-ink'
+                        }`}
+                      >
+                        {active && (
+                          <motion.span
+                            layoutId="route-mode-pill"
+                            transition={snappySpring}
+                            className="absolute inset-0 rounded-lg bg-[#0052FF]"
+                          />
+                        )}
+                        <span className="relative z-10 truncate block">{opt.label}</span>
+                      </button>
+                    );
+                  })}
                 </div>
 
                 {useEthRoute && !isEthPoolSeeded && (
                   <div className="p-2.5 bg-amber-950/40 border border-amber-800/60 rounded-xl text-[11px] text-amber-200 flex items-center justify-between gap-2">
-                    <span>ETH/{activeStock.symbol} v4 pool not seeded on current Router yet.</span>
+                    <span>ETH/{activeStock.symbol} pool not seeded on current Router.</span>
                     <button
                       type="button"
                       onClick={() => handleToggleRoute(false)}
-                      className="underline font-bold text-amber-300 whitespace-nowrap"
+                      className="underline font-semibold text-amber-300 whitespace-nowrap"
                     >
                       Use {activeStock.symbol}
                     </button>
                   </div>
                 )}
 
-                {/* Slippage Settings Drawer */}
                 {showSettings && (
-                  <div className="p-3 bg-background border border-border rounded-xl space-y-2 text-xs">
-                    <span className="font-semibold text-gray-300 block">Slippage Tolerance Protection</span>
+                  <div className="p-3 bg-[#080B10] border border-white/[0.08] rounded-xl space-y-2 text-xs">
+                    <span className="font-medium text-ink block">Slippage Tolerance</span>
                     <div className="flex items-center space-x-2">
-                      {['0.1', '0.5', '1.0'].map((val) => (
+                      {['0.5', '1.0', '2.0'].map((val) => (
                         <button
                           key={val}
                           onClick={() => {
                             setSlippage(val);
                             setCustomSlippage('');
                           }}
-                          className={`px-2.5 py-1 rounded-lg border font-medium transition-colors ${
+                          className={`px-2.5 py-1 rounded-lg border font-mono text-[11px] transition-colors ${
                             slippage === val && !customSlippage
-                              ? 'bg-primary text-white border-primary'
-                              : 'bg-surface text-gray-400 border-border hover:text-white'
+                              ? 'bg-[#0052FF] text-white border-[#0052FF]'
+                              : 'bg-[#0E141C] text-muted border-white/[0.08] hover:text-white'
                           }`}
                         >
                           {val}%
                         </button>
                       ))}
-
                       <div className="flex items-center space-x-1">
                         <input
                           type="number"
                           placeholder="Custom"
                           value={customSlippage}
                           onChange={(e) => setCustomSlippage(e.target.value)}
-                          className="w-16 px-2 py-1 bg-surface border border-border rounded-lg text-white text-xs focus:outline-none focus:border-primary"
+                          className="w-16 px-2 py-1 bg-[#0E141C] border border-white/[0.08] rounded-lg text-white font-mono text-xs focus:outline-none focus:border-[#0052FF]"
                         />
-                        <span className="text-gray-400">%</span>
+                        <span className="text-muted">%</span>
                       </div>
                     </div>
                   </div>
                 )}
 
                 {/* From Box */}
-                <div className="bg-background border border-border/80 rounded-xl p-3.5">
-                  <div className="flex justify-between items-center text-xs text-gray-400 mb-1.5">
+                <div className="bg-[#080B10] border border-white/[0.08] focus-within:border-[#0052FF]/60 transition-colors rounded-xl p-3.5">
+                  <div className="flex justify-between items-center text-xs text-muted mb-1.5">
                     <span>You Pay</span>
-                    <div className="flex items-center space-x-1.5">
+                    <div className="flex items-center space-x-2 font-mono text-[11px] tabular-nums">
                       <span>
-                        Balance:{' '}
+                        Bal:{' '}
                         {userPayingBalance.toLocaleString(undefined, {
                           maximumFractionDigits: isTokenToStock ? 0 : 4,
                         })}{' '}
@@ -481,7 +625,7 @@ function SwapContent() {
                       {userPayingBalance > 0 && (
                         <button
                           onClick={handleMaxClick}
-                          className="text-[10px] bg-primary/20 hover:bg-primary/30 text-primary px-1.5 py-0.5 rounded font-bold"
+                          className="text-[10px] bg-[#0052FF]/20 hover:bg-[#0052FF]/30 text-[#7CA8FF] px-1.5 py-0.5 rounded font-semibold"
                         >
                           MAX
                         </button>
@@ -489,7 +633,7 @@ function SwapContent() {
                       {!isTokenToStock && !useEthRoute && isSepolia && (
                         <button
                           onClick={() => setIsFaucetOpen(true)}
-                          className="text-[10px] text-emerald-400 hover:text-emerald-300 font-semibold underline"
+                          className="text-[10px] text-[#00E599] hover:underline font-semibold"
                         >
                           +Faucet
                         </button>
@@ -497,67 +641,69 @@ function SwapContent() {
                     </div>
                   </div>
 
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2">
                     <input
                       type="number"
                       value={fromAmount}
                       onChange={(e) => setFromAmount(e.target.value)}
                       placeholder="0.0"
-                      className="bg-transparent text-2xl font-semibold text-white focus:outline-none w-3/5"
+                      className="bg-transparent font-mono text-xl sm:text-2xl font-semibold text-white focus:outline-none flex-1 min-w-0 tabular-nums"
                     />
 
                     {!isTokenToStock ? (
                       useEthRoute ? (
-                        <div className="flex items-center space-x-1.5 bg-surface-hover border border-border rounded-lg px-3 py-1.5 text-white font-medium text-xs">
-                          <span className="font-bold">ETH</span>
-                          <span className="text-[10px] text-primary">(via {activeStock.symbol})</span>
+                        <div className="flex items-center space-x-1.5 bg-[#141C27] border border-white/[0.08] rounded-lg px-3 py-1.5 text-white font-medium text-xs shrink-0">
+                          <span className="font-mono font-semibold">ETH</span>
+                          <span className="text-[10px] text-[#00E599]">via {activeStock.symbol}</span>
                         </div>
                       ) : (
-                        <div className="flex items-center space-x-1.5 bg-surface-hover border border-border rounded-lg px-3 py-1.5 text-white font-medium text-xs">
-                          <span className="font-bold">{activeStock.symbol}</span>
-                          <span className="text-[10px] text-gray-400">({activeStock.ticker})</span>
+                        <div className="flex items-center space-x-2 bg-[#141C27] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-white font-medium text-xs shrink-0">
+                          <StockEquityBadge symbol={activeStock.symbol} size="sm" />
+                          <span>{activeStock.symbol}</span>
                         </div>
                       )
                     ) : (
-                      <div className="flex items-center space-x-1.5 bg-surface-hover border border-border rounded-lg px-3 py-1.5 text-white font-medium text-xs">
-                        <span>🐂</span>
+                      <div className="flex items-center space-x-2 bg-[#141C27] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-white font-medium text-xs shrink-0">
+                        <TokenEmblem symbol={activeToken.symbol} size="sm" />
                         <span>${activeToken.symbol}</span>
                       </div>
                     )}
                   </div>
 
-                  {/* Subtext */}
-                  <div className="mt-2 text-[11px] text-gray-500 flex justify-between">
+                  <div className="mt-2 font-mono text-[11px] text-muted flex flex-wrap justify-between gap-1 tabular-nums">
                     <span>
                       {!isTokenToStock
                         ? useEthRoute
-                          ? `Est. intermediate: ~${intermediateStockOut.toFixed(4)} ${activeStock.symbol} (~$${(intermediateStockOut * stockUsd).toFixed(2)})`
+                          ? `Intermediate: ~${intermediateStockOut.toFixed(4)} ${activeStock.symbol} ($${(intermediateStockOut * stockUsd).toFixed(2)})`
                           : `~$${(parsedFrom * stockUsd).toFixed(2)} USD`
                         : `~$${(parsedFrom * parseFloat(tokenPriceUsd)).toFixed(2)} USD`}
                     </span>
-                    <span className="text-gray-400">
+                    <span>
                       1 {activeStock.symbol} = ${stockUsd.toFixed(2)}
                     </span>
                   </div>
                 </div>
 
-                {/* Invert Direction Button */}
+                {/* Tactile Swap Direction Flip */}
                 <div className="flex justify-center -my-2 relative z-10">
-                  <button
+                  <motion.button
+                    whileHover={{ rotate: 180 }}
+                    whileTap={{ scale: 0.92 }}
+                    transition={snappySpring}
                     onClick={() => setIsTokenToStock(!isTokenToStock)}
-                    className="bg-surface border border-border hover:border-primary p-2 rounded-xl text-gray-400 hover:text-white transition-all shadow-md"
-                    title="Switch buy / sell direction"
+                    className="bg-[#141C27] border border-white/[0.12] hover:border-[#00E599]/60 p-2 rounded-xl text-ink shadow-md"
+                    title="Invert swap direction"
                   >
-                    <ArrowDownUp className="w-4 h-4" />
-                  </button>
+                    <ArrowDownUp className="w-4 h-4 text-[#00E599]" strokeWidth={1.75} />
+                  </motion.button>
                 </div>
 
                 {/* To Box */}
-                <div className="bg-background border border-border/80 rounded-xl p-3.5 mt-1">
-                  <div className="flex justify-between items-center text-xs text-gray-400 mb-1.5">
-                    <span>You Receive (Estimated)</span>
-                    <span>
-                      Balance:{' '}
+                <div className="bg-[#080B10] border border-white/[0.08] rounded-xl p-3.5">
+                  <div className="flex justify-between items-center text-xs text-muted mb-1.5">
+                    <span>You Receive</span>
+                    <span className="font-mono text-[11px] tabular-nums">
+                      Bal:{' '}
                       {userReceivingBalance.toLocaleString(undefined, {
                         maximumFractionDigits: isTokenToStock ? 4 : 0,
                       })}{' '}
@@ -565,38 +711,38 @@ function SwapContent() {
                     </span>
                   </div>
 
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between gap-2">
                     <input
                       type="text"
                       readOnly
                       value={formattedToAmount}
                       placeholder="0.0"
-                      className="bg-transparent text-2xl font-semibold text-white focus:outline-none w-3/5 cursor-default"
+                      className="bg-transparent font-mono text-xl sm:text-2xl font-semibold text-white focus:outline-none flex-1 min-w-0 cursor-default tabular-nums"
                     />
 
                     {isTokenToStock ? (
                       useEthRoute ? (
-                        <div className="flex items-center space-x-1.5 bg-surface-hover border border-border rounded-lg px-3 py-1.5 text-white font-medium text-xs">
-                          <span className="font-bold">ETH</span>
-                          <span className="text-[10px] text-primary">(via {activeStock.symbol})</span>
+                        <div className="flex items-center space-x-1.5 bg-[#141C27] border border-white/[0.08] rounded-lg px-3 py-1.5 text-white font-medium text-xs shrink-0">
+                          <span className="font-mono font-semibold">ETH</span>
+                          <span className="text-[10px] text-[#00E599]">via {activeStock.symbol}</span>
                         </div>
                       ) : (
-                        <div className="flex items-center space-x-1.5 bg-surface-hover border border-border rounded-lg px-3 py-1.5 text-white font-medium text-xs">
-                          <span className="font-bold">{activeStock.symbol}</span>
-                          <span className="text-[10px] text-gray-400">({activeStock.ticker})</span>
+                        <div className="flex items-center space-x-2 bg-[#141C27] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-white font-medium text-xs shrink-0">
+                          <StockEquityBadge symbol={activeStock.symbol} size="sm" />
+                          <span>{activeStock.symbol}</span>
                         </div>
                       )
                     ) : (
-                      <div className="flex items-center space-x-1.5 bg-surface-hover border border-border rounded-lg px-3 py-1.5 text-white font-medium text-xs">
-                        <span>🐂</span>
+                      <div className="flex items-center space-x-2 bg-[#141C27] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-white font-medium text-xs shrink-0">
+                        <TokenEmblem symbol={activeToken.symbol} size="sm" />
                         <span>${activeToken.symbol}</span>
                       </div>
                     )}
                   </div>
 
-                  <div className="mt-2 text-[11px] text-gray-500 flex justify-between">
+                  <div className="mt-2 font-mono text-[11px] text-muted flex flex-wrap justify-between gap-1 tabular-nums">
                     <span>
-                      Min ({effectiveSlippage}% slippage): {minReceived}{' '}
+                      Min ({effectiveSlippage}%): {minReceived}{' '}
                       {isTokenToStock ? baseAssetSymbol : activeToken.symbol}
                     </span>
                     {isTokenToStock && useEthRoute && intermediateStockOut > 0 && (
@@ -605,161 +751,150 @@ function SwapContent() {
                   </div>
                 </div>
 
-                {/* Pricing, Impact, and Fee Breakdown */}
-                <div className="p-3 bg-background/50 border border-border/60 rounded-xl space-y-2 text-xs">
-                  <div className="flex justify-between text-gray-400">
+                {/* Breakdown Drawer */}
+                <div className="p-3 bg-[#080B10]/70 border border-white/[0.06] rounded-xl space-y-2 text-xs">
+                  <div className="flex flex-wrap justify-between gap-1 text-muted">
                     <span>Execution Route</span>
-                    <span className="text-primary font-semibold text-[11px]">
+                    <span className="font-mono text-[#00E599] text-[11px]">
                       {useEthRoute
                         ? isTokenToStock
-                          ? `$${activeToken.symbol} → ${activeStock.symbol} (Curve) → ETH (Uniswap v4)`
-                          : `ETH → ${activeStock.symbol} (Uniswap v4) → $${activeToken.symbol}`
+                          ? `$${activeToken.symbol} → ${activeStock.symbol} → ETH`
+                          : `ETH → ${activeStock.symbol} → $${activeToken.symbol}`
                         : isTokenToStock
                         ? `$${activeToken.symbol} → ${activeStock.symbol}`
                         : `${activeStock.symbol} → $${activeToken.symbol}`}
                     </span>
                   </div>
 
-                  <div className="flex justify-between text-gray-400">
+                  <div className="flex flex-wrap justify-between gap-1 text-muted">
                     <span>Dual Price</span>
-                    <div className="text-right text-gray-200">
-                      <span className="block font-medium">1 ${activeToken.symbol} ≈ ${tokenPriceUsd} USD</span>
-                      <span className="text-[10px] text-gray-400">
-                        (1 {activeStock.symbol} ≈ {rate.toLocaleString(undefined, { maximumFractionDigits: 0 })} {activeToken.symbol})
+                    <div className="text-right font-mono text-ink text-[11px] tabular-nums">
+                      <span className="block">1 ${activeToken.symbol} ≈ ${tokenPriceUsd} USD</span>
+                      <span className="text-muted text-[10px]">
+                        1 {activeStock.symbol} ≈ {rate.toLocaleString(undefined, { maximumFractionDigits: 0 })} {activeToken.symbol}
                       </span>
                     </div>
                   </div>
 
-                  <div className="flex justify-between text-gray-400 items-center">
+                  <div className="flex justify-between text-muted items-center">
                     <span>Price Impact</span>
                     <span
-                      className={`font-semibold px-1.5 py-0.5 rounded text-[11px] ${
+                      className={`font-mono font-semibold px-1.5 py-0.5 rounded text-[11px] ${
                         numericPriceImpact > 3
-                          ? 'bg-red-950/60 text-danger border border-red-800'
+                          ? 'bg-red-950/60 text-red-400 border border-red-800/60'
                           : numericPriceImpact > 1
-                          ? 'bg-amber-950/60 text-warning border border-amber-800'
-                          : 'bg-green-950/60 text-success border border-green-800'
+                          ? 'bg-amber-950/60 text-amber-300 border border-amber-800/60'
+                          : 'bg-[#00E599]/10 text-[#00E599] border border-[#00E599]/30'
                       }`}
                     >
-                      {priceImpact}% {numericPriceImpact > 3 ? '(High)' : ''}
+                      {priceImpact}%
                     </span>
                   </div>
 
-                  <div className="flex justify-between text-gray-400">
-                    <span>Trading Fees</span>
-                    <span className="text-gray-200 text-[11px]">
-                      {creatorFeePercent}% Creator{activeToken?.isGraduated ? ` + ${poolFeePercent}% v4 LP` : ''}
+                  <div className="flex flex-wrap justify-between gap-1 text-muted">
+                    <span>Protocol &amp; Creator Fee</span>
+                    <span className="font-mono text-ink text-[11px] tabular-nums text-right">
+                      {creatorFeePercent}% Creator{activeToken?.isGraduated || useEthRoute ? ` + ${poolFeePercent}% v4 LP` : ''}
                       {isSepolia && ' + 0.10% Treasury'} (~{estimatedFeeB20} {activeStock.symbol})
                     </span>
                   </div>
 
                   {isSepolia && (
-                    <div className="flex justify-between items-center text-gray-400 pt-1 border-t border-border/40">
-                      <span className="text-[11px] flex items-center gap-1 text-gray-400">
-                        <ShieldCheck className="w-3 h-3 text-primary" />
-                        Testnet Treasury Fee (0.10% Cap)
+                    <div className="flex justify-between items-center text-muted pt-1.5 border-t border-white/[0.06]">
+                      <span className="text-[11px] flex items-center gap-1">
+                        <ShieldCheck className="w-3.5 h-3.5 text-[#00E599]" strokeWidth={1.6} />
+                        Testnet Treasury (0.10% Cap)
                       </span>
                       <a
                         href="https://sepolia.basescan.org/address/0xc96147c68ca8e153e70B3bC4745b8d974bDd212A"
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-[11px] font-mono text-primary hover:underline flex items-center gap-1"
-                        title="Testnet Treasury Address: 0xc96147c68ca8e153e70B3bC4745b8d974bDd212A"
+                        className="text-[11px] font-mono text-[#7CA8FF] hover:underline flex items-center gap-1"
                       >
                         <span>0xc961...212A</span>
-                        <ExternalLink className="w-3 h-3" />
+                        <ExternalLink className="w-3 h-3" strokeWidth={1.6} />
                       </a>
                     </div>
                   )}
                 </div>
 
-                {/* Transaction Confirmed Card */}
                 {txState === 'CONFIRMED' && lastTxHash && (
-                  <div className="p-3 bg-green-950/40 border border-green-800 rounded-xl text-xs text-green-300 flex items-center justify-between animate-fadeIn">
+                  <div className="p-3 bg-[#00E599]/10 border border-[#00E599]/35 rounded-xl text-xs text-[#00E599] flex items-center justify-between">
                     <div className="flex items-center space-x-2">
-                      <CheckCircle2 className="w-4 h-4 text-green-400" />
-                      <span>Swap confirmed on Base!</span>
+                      <CheckCircle2 className="w-4 h-4" strokeWidth={1.75} />
+                      <span>Confirmed on Base Sepolia</span>
                     </div>
                     <a
                       href={`${explorerUrl}/tx/${lastTxHash}`}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="flex items-center space-x-1 underline hover:text-white"
+                      className="flex items-center space-x-1 underline hover:text-white font-mono"
                     >
-                      <span>View Tx</span>
-                      <ExternalLink className="w-3 h-3" />
+                      <span>BaseScan</span>
+                      <ExternalLink className="w-3 h-3" strokeWidth={1.6} />
                     </a>
                   </div>
                 )}
 
-                {/* Error Message */}
                 {errorMessage && (
-                  <div className="p-3 bg-red-950/40 border border-red-800 rounded-xl text-xs text-red-300 flex items-center space-x-2 animate-fadeIn">
-                    <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                  <div className="p-3 bg-red-950/50 border border-red-800/70 rounded-xl text-xs text-red-300 flex items-center space-x-2">
+                    <AlertCircle className="w-4 h-4 text-red-400 shrink-0" strokeWidth={1.6} />
                     <span>{errorMessage}</span>
                   </div>
                 )}
 
-                {/* Action Button */}
+                {/* Tactile Swap Action */}
                 <div>
                   {!isConnected ? (
-                    <button
-                      disabled
-                      className="w-full py-3.5 bg-surface-hover border border-border text-gray-400 rounded-xl font-medium cursor-not-allowed text-xs"
-                    >
+                    <TactileButton disabled variant="secondary" className="w-full py-3.5 text-xs">
                       Connect Wallet to Trade
-                    </button>
+                    </TactileButton>
                   ) : isMainnet && isMainnetPaused ? (
-                    <button
+                    <TactileButton
+                      variant="secondary"
                       onClick={() => switchChain?.({ chainId: baseSepolia.id })}
-                      className="w-full py-3.5 bg-amber-900/60 hover:bg-amber-800/80 border border-amber-700 text-amber-200 rounded-xl font-bold transition-all text-xs flex items-center justify-center space-x-2"
+                      className="w-full py-3.5 text-xs space-x-2 border-amber-700/70 text-amber-200"
                     >
-                      <Pause className="w-4 h-4 text-amber-400" />
-                      <span>Mainnet Paused — Switch to Base Sepolia Testnet</span>
-                    </button>
+                      <Pause className="w-4 h-4 text-amber-400" strokeWidth={1.75} />
+                      <span>Mainnet Paused — Switch to Base Sepolia</span>
+                    </TactileButton>
                   ) : parsedFrom > userPayingBalance ? (
                     <div className="space-y-2">
-                      <button
-                        disabled
-                        className="w-full py-3.5 bg-surface-hover border border-border text-gray-500 rounded-xl font-bold cursor-not-allowed text-xs"
-                      >
+                      <TactileButton disabled variant="secondary" className="w-full py-3.5 text-xs">
                         Insufficient {isTokenToStock ? activeToken.symbol : baseAssetSymbol} Balance
-                      </button>
+                      </TactileButton>
                       {!isTokenToStock && !useEthRoute && isSepolia && (
-                        <button
+                        <TactileButton
+                          variant="emerald"
                           onClick={() => setIsFaucetOpen(true)}
-                          className="w-full py-2 bg-emerald-950/60 hover:bg-emerald-900/60 border border-emerald-800 text-emerald-300 rounded-xl font-semibold text-xs transition-colors flex items-center justify-center space-x-1.5"
+                          className="w-full py-2.5 text-xs space-x-1.5"
                         >
-                          <Droplets className="w-3.5 h-3.5 text-emerald-400" />
-                          <span>Claim Free {activeStock.symbol} from Faucet</span>
-                        </button>
+                          <Droplets className="w-3.5 h-3.5" strokeWidth={1.75} />
+                          <span>Claim Free {activeStock.symbol}</span>
+                        </TactileButton>
                       )}
                     </div>
                   ) : exceedsMaxWallet ? (
-                    <div className="space-y-2">
-                      <button
-                        disabled
-                        className="w-full py-3.5 bg-amber-950/60 border border-amber-800 text-amber-300 rounded-xl font-bold cursor-not-allowed text-xs"
-                      >
-                        Exceeds Fair-Launch Max-Wallet Cap ({((activeToken.maxWalletBps || 200) / 100).toFixed(1)}%) — Lower Trade Amount
-                      </button>
-                    </div>
+                    <TactileButton disabled variant="secondary" className="w-full py-3.5 text-xs text-amber-300 border-amber-800/60">
+                      Exceeds {((activeToken.maxWalletBps || 200) / 100).toFixed(1)}% Max-Wallet Cap — Lower Amount
+                    </TactileButton>
                   ) : (
-                    <button
+                    <TactileButton
+                      variant={useEthRoute ? 'emerald' : 'primary'}
                       disabled={parsedFrom <= 0 || isQuoting || txState !== 'IDLE' || (useEthRoute && !isEthPoolSeeded)}
                       onClick={handleSwap}
-                      className="w-full py-3.5 bg-primary hover:bg-primary-hover disabled:bg-surface-hover disabled:text-gray-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-primary/20 flex items-center justify-center space-x-2 text-xs"
+                      className="w-full py-3.5 text-xs space-x-2"
                     >
                       {txState === 'APPROVING' && (
                         <>
-                          <RefreshCw className="w-4 h-4 animate-spin" />
-                          <span>Confirming Approval in Wallet...</span>
+                          <RefreshCw className="w-4 h-4 animate-spin" strokeWidth={1.75} />
+                          <span>Confirm Approval in Wallet...</span>
                         </>
                       )}
                       {txState === 'SWAPPING' && (
                         <>
-                          <RefreshCw className="w-4 h-4 animate-spin" />
-                          <span>Confirming Swap in Wallet...</span>
+                          <RefreshCw className="w-4 h-4 animate-spin" strokeWidth={1.75} />
+                          <span>Confirming On-Chain Swap...</span>
                         </>
                       )}
                       {txState === 'IDLE' && (
@@ -767,17 +902,16 @@ function SwapContent() {
                           {useEthRoute
                             ? isTokenToStock
                               ? `Sell $${activeToken.symbol} → ${activeStock.symbol} → ETH`
-                              : `Buy $${activeToken.symbol} with ETH (via ${activeStock.symbol})`
+                              : `Buy $${activeToken.symbol} with ETH`
                             : `Swap ${activeStock.symbol} / $${activeToken.symbol}`}
                         </span>
                       )}
-                      {txState === 'CONFIRMED' && <span>Trade Confirmed On-Chain!</span>}
-                    </button>
+                      {txState === 'CONFIRMED' && <span>Trade Confirmed On-Chain</span>}
+                    </TactileButton>
                   )}
                 </div>
-              </div>
+              </SpotlightCard>
             ) : (
-              /* Liquidity Viewer Component */
               <LiquidityViewer
                 tokenSymbol={activeToken.symbol}
                 stockSymbol={activeStock.symbol}
@@ -796,112 +930,110 @@ function SwapContent() {
         </div>
       ) : null}
 
-      {/* Protocol Features & Ecosystem Hub */}
-      <div className="pt-8 border-t border-border/80 space-y-5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-          <div>
-            <h2 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
-              <span>🐂</span>
-              <span>All bulldot.xyz Features</span>
+      {/* Asymmetric 2:1 Editorial Feature & Architecture Section (Anti-Slop Layout) */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 pt-4">
+        <SpotlightCard
+          outerClassName="lg:col-span-2"
+          className="p-6 sm:p-7 flex flex-col justify-between space-y-5"
+        >
+          <div className="space-y-3">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <span className="font-mono text-[10px] uppercase tracking-micro text-[#00E599]">
+                Unified Protocol Pipeline
+              </span>
+              <span className="text-[11px] font-mono text-muted">
+                Zero Admin Custody • Non-Upgradeable
+              </span>
+            </div>
+            <h2 className="font-display text-xl sm:text-2xl font-semibold text-white tracking-tight">
+              From Native ETH to Equity-Backed Liquidity in One Transaction
             </h2>
-            <p className="text-xs text-gray-400 mt-0.5">
-              Everything you need: token launchpad, liquidity pool explorer, and creator equity fee management.
+            <p className="text-xs sm:text-sm text-muted max-w-2xl leading-relaxed">
+              Every trade passes cleanly through <span className="font-mono text-ink">BulldotRouter</span>: Native ETH enters Uniswap v4&apos;s <span className="font-mono text-ink">PoolManager</span>, converts to the paired B20 stock, and settles into an autonomous <span className="font-mono text-ink">BulldotBondingCurve</span>. At 50 canonical shares, liquidity graduates irreversibly to Uniswap v4.
             </p>
           </div>
-          <Link
-            href="/launch"
-            className="self-start sm:self-auto px-3.5 py-1.5 rounded-xl bg-primary hover:bg-primary-hover text-white text-xs font-bold transition-all shadow-md flex items-center space-x-1.5"
-          >
-            <Rocket className="w-3.5 h-3.5" />
-            <span>Launch a New Token</span>
-          </Link>
-        </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* Card 1: Token Launchpad */}
-          <Link
-            href="/launch"
-            className="p-5 bg-surface border border-border hover:border-primary/60 rounded-2xl transition-all group shadow-md hover:shadow-primary/5 space-y-3 block"
-          >
-            <div className="flex items-center justify-between">
-              <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary group-hover:scale-105 transition-transform">
-                <Rocket className="w-5 h-5" />
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-1">
+            <Link
+              href="/launch"
+              className="p-3.5 rounded-xl bg-[#080B10] border border-white/[0.07] hover:border-[#00E599]/40 transition-colors group"
+            >
+              <div className="flex items-center justify-between text-xs font-semibold text-white">
+                <span>Launchpad</span>
+                <ArrowRight className="w-3.5 h-3.5 text-[#00E599] group-hover:translate-x-0.5 transition-transform" strokeWidth={1.75} />
               </div>
-              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-blue-950/60 text-blue-300 border border-blue-800">
-                Launchpad
-              </span>
-            </div>
-            <div>
-              <h3 className="font-bold text-white text-base group-hover:text-primary transition-colors flex items-center gap-1.5">
-                <span>Token Launchpad</span>
-                <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
-              </h3>
-              <p className="text-xs text-gray-400 mt-1 leading-relaxed">
-                Launch community tokens with Fair Launch Bonding Curves (0 capital needed) or Instant Uniswap v4 pools with 100% liquidity locked forever to 0x...dEaD.
+              <p className="text-[11px] text-muted mt-1">
+                Zero-capital fair curves or instant v4 locks.
               </p>
-            </div>
-            <div className="text-xs font-semibold text-primary pt-1 flex items-center gap-1">
-              <span>Deploy Token Now</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </div>
-          </Link>
+            </Link>
 
-          {/* Card 2: Explore Pools */}
-          <Link
-            href="/explore"
-            className="p-5 bg-surface border border-border hover:border-primary/60 rounded-2xl transition-all group shadow-md hover:shadow-primary/5 space-y-3 block"
-          >
-            <div className="flex items-center justify-between">
-              <div className="w-10 h-10 rounded-xl bg-emerald-950/60 border border-emerald-800/40 flex items-center justify-center text-emerald-400 group-hover:scale-105 transition-transform">
-                <Layers className="w-5 h-5" />
+            <Link
+              href="/explore"
+              className="p-3.5 rounded-xl bg-[#080B10] border border-white/[0.07] hover:border-[#0052FF]/50 transition-colors group"
+            >
+              <div className="flex items-center justify-between text-xs font-semibold text-white">
+                <span>Explore Pools</span>
+                <ArrowRight className="w-3.5 h-3.5 text-[#7CA8FF] group-hover:translate-x-0.5 transition-transform" strokeWidth={1.75} />
               </div>
-              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-emerald-950/60 text-emerald-300 border border-emerald-800">
-                Explore Pools
-              </span>
-            </div>
-            <div>
-              <h3 className="font-bold text-white text-base group-hover:text-emerald-400 transition-colors flex items-center gap-1.5">
-                <span>Explore Pools & Curves</span>
-                <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
-              </h3>
-              <p className="text-xs text-gray-400 mt-1 leading-relaxed">
-                Browse verified community tokens paired with bCOIN, bNVDA, bAAPL, and bTSLA. Track bonding curve graduation progress in real time.
+              <p className="text-[11px] text-muted mt-1">
+                Inspect live reserves &amp; curve graduation.
               </p>
-            </div>
-            <div className="text-xs font-semibold text-emerald-400 pt-1 flex items-center gap-1">
-              <span>View All Pools</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </div>
-          </Link>
+            </Link>
 
-          {/* Card 3: Creator Hub & Treasury */}
-          <Link
-            href="/dashboard"
-            className="p-5 bg-surface border border-border hover:border-primary/60 rounded-2xl transition-all group shadow-md hover:shadow-primary/5 space-y-3 block"
-          >
-            <div className="flex items-center justify-between">
-              <div className="w-10 h-10 rounded-xl bg-amber-950/60 border border-amber-800/40 flex items-center justify-center text-amber-400 group-hover:scale-105 transition-transform">
-                <Building2 className="w-5 h-5" />
+            <Link
+              href="/dashboard"
+              className="p-3.5 rounded-xl bg-[#080B10] border border-white/[0.07] hover:border-[#00E599]/40 transition-colors group"
+            >
+              <div className="flex items-center justify-between text-xs font-semibold text-white">
+                <span>Creator Hub</span>
+                <ArrowRight className="w-3.5 h-3.5 text-[#00E599] group-hover:translate-x-0.5 transition-transform" strokeWidth={1.75} />
               </div>
-              <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-amber-950/60 text-amber-300 border border-amber-800">
-                Creator Hub
-              </span>
-            </div>
-            <div>
-              <h3 className="font-bold text-white text-base group-hover:text-amber-400 transition-colors flex items-center gap-1.5">
-                <span>Creator & Treasury Hub</span>
-                <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-opacity" />
-              </h3>
-              <p className="text-xs text-gray-400 mt-1 leading-relaxed">
-                Track raw and canonical share earnings, claim fee rewards, or redirect fees to Coinbase stock treasuries for automated buybacks and burns.
+              <p className="text-[11px] text-muted mt-1">
+                Claim fees or redirect yields to stock burns.
               </p>
+            </Link>
+          </div>
+        </SpotlightCard>
+
+        <SpotlightCard
+          accent="blue"
+          outerClassName="lg:col-span-1"
+          className="p-6 flex flex-col justify-between space-y-4"
+        >
+          <div className="space-y-3">
+            <div className="flex items-center space-x-2 text-xs font-mono uppercase tracking-micro text-[#7CA8FF]">
+              <Lock className="w-3.5 h-3.5" strokeWidth={1.75} />
+              <span>Security Invariants</span>
             </div>
-            <div className="text-xs font-semibold text-amber-400 pt-1 flex items-center gap-1">
-              <span>Manage Fees & Claims</span>
-              <ArrowRight className="w-3.5 h-3.5" />
-            </div>
-          </Link>
-        </div>
+            <h3 className="font-display text-lg font-semibold text-white tracking-tight">
+              Built to Run Unattended
+            </h3>
+            <ul className="space-y-2 text-xs text-muted">
+              <li className="flex items-start space-x-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#00E599] mt-1.5 shrink-0" />
+                <span>Split-invariant B20 graduation normalized in canonical shares.</span>
+              </li>
+              <li className="flex items-start space-x-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#0052FF] mt-1.5 shrink-0" />
+                <span>Router holds zero custody; excess capital auto-refunds.</span>
+              </li>
+              <li className="flex items-start space-x-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-[#00E599] mt-1.5 shrink-0" />
+                <span>100% of LP minted permanently to <span className="font-mono text-ink">0x...dEaD</span>.</span>
+              </li>
+            </ul>
+          </div>
+
+          <TactileLink
+            href="/docs"
+            variant="secondary"
+            wrapperClassName="pt-2 block w-full"
+            className="w-full py-2.5 text-xs space-x-1.5"
+          >
+            <BookOpen className="w-3.5 h-3.5 text-[#7CA8FF]" strokeWidth={1.6} />
+            <span>Read Full Documentation</span>
+          </TactileLink>
+        </SpotlightCard>
       </div>
     </div>
   );
@@ -909,7 +1041,7 @@ function SwapContent() {
 
 export default function SwapPage() {
   return (
-    <Suspense fallback={<div className="text-center py-12 text-gray-400">Loading exchange...</div>}>
+    <Suspense fallback={<div className="text-center py-12 font-mono text-xs text-muted">Loading exchange...</div>}>
       <SwapContent />
     </Suspense>
   );

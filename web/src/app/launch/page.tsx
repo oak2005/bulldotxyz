@@ -1,30 +1,33 @@
 'use client';
 
 import React, { useState } from 'react';
-import Link from 'next/link';
+import { motion } from 'framer-motion';
 import { VERIFIED_B20_STOCKS } from '../../config/stocks';
+import { StockEquityBadge } from '../../components/BrandAssets';
+import {
+  SpotlightCard,
+  TactileButton,
+  TactileLink,
+  Reveal,
+  snappySpring,
+} from '../../components/MotionPrimitives';
 import {
   ShieldCheck,
   Rocket,
   Flame,
-  Layers,
   AlertTriangle,
   CheckCircle2,
-  Lock,
-  Info,
   ExternalLink,
   Pause,
-  Droplets,
   RefreshCw,
   ArrowRight,
 } from 'lucide-react';
-import { useAccount, useChainId, useSwitchChain } from 'wagmi';
+import { useAccount, useSwitchChain } from 'wagmi';
 import { baseSepolia } from 'wagmi/chains';
 import { useProtocol, TokenPair } from '../../context/ProtocolContext';
 
 export default function LaunchPage() {
-  const { isConnected, address } = useAccount();
-  const chainId = useChainId();
+  const { isConnected } = useAccount();
   const { switchChain } = useSwitchChain();
 
   const {
@@ -87,199 +90,217 @@ export default function LaunchPage() {
   };
 
   return (
-    <div className="max-w-2xl mx-auto space-y-6">
-      {/* Page Header */}
-      <div className="text-center">
-        <h1 className="text-3xl font-extrabold text-white tracking-tight">Launch a Token on Base</h1>
-        <p className="text-gray-400 mt-2 text-sm">
-          Paired exclusively with verified Coinbase tokenized equities. Completely autonomous, fair, and permanent.
+    <div className="max-w-3xl mx-auto space-y-6">
+      <Reveal className="space-y-1.5">
+        <span className="font-mono text-[10px] uppercase tracking-micro text-[#00E599]">
+          Token Deployment Factory
+        </span>
+        <h1 className="font-display text-3xl sm:text-4xl font-semibold text-white tracking-display">
+          Launch an Equity-Paired Token
+        </h1>
+        <p className="text-sm text-muted">
+          Deploy via BulldotFactory directly onto Base Sepolia with immutable supply and Uniswap v4 permanence.
         </p>
-      </div>
+      </Reveal>
 
-      {/* Deployment Success Card */}
       {deployedTx && deployedToken && (
-        <div className="p-5 bg-green-950/40 border border-green-800 rounded-2xl text-xs text-green-300 space-y-3 animate-fadeIn">
+        <SpotlightCard
+          accent="emerald"
+          outerClassName="border-[#00E599]/40"
+          className="p-5 text-xs text-[#00E599] space-y-3"
+        >
           <div className="flex items-center justify-between">
-            <span className="font-bold text-sm text-green-400 flex items-center gap-1.5">
-              <CheckCircle2 className="w-5 h-5" />
-              Token Successfully Deployed!
+            <span className="font-display font-semibold text-base text-white flex items-center gap-2">
+              <CheckCircle2 className="w-5 h-5 text-[#00E599]" strokeWidth={1.75} />
+              <span>Deployed On-Chain to Base Sepolia</span>
             </span>
             <a
               href={`${explorerUrl}/tx/${deployedTx}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="flex items-center space-x-1 underline hover:text-white"
+              className="flex items-center space-x-1 underline hover:text-white font-mono"
             >
-              <span>View on BaseScan</span>
-              <ExternalLink className="w-3.5 h-3.5" />
+              <span>BaseScan</span>
+              <ExternalLink className="w-3.5 h-3.5" strokeWidth={1.6} />
             </a>
           </div>
 
-          <p className="text-green-300/80 leading-relaxed">
-            <strong>${deployedToken.symbol}</strong> ({deployedToken.name}) is deployed on Base Sepolia via BulldotFactory and paired with{' '}
-            <strong>{deployedToken.pairedStockSymbol}</strong>. Official verification badge (`isOfficialLaunch`) granted on-chain.
+          <p className="text-ink/85 leading-relaxed">
+            <strong>${deployedToken.symbol}</strong> ({deployedToken.name}) is deployed via <span className="font-mono">BulldotFactory</span> and paired with{' '}
+            <strong>{deployedToken.pairedStockSymbol}</strong>. Official verification granted on-chain.
           </p>
 
           {deployedToken.tokenAddress !== '0x0000000000000000000000000000000000000000' && (
-            <div className="text-[11px] font-mono text-green-200/90 flex items-center gap-2">
-              <span>Token Contract:</span>
+            <div className="text-[11px] font-mono text-muted flex items-center gap-2">
+              <span>Token:</span>
               <a
                 href={`${explorerUrl}/token/${deployedToken.tokenAddress}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="underline hover:text-white flex items-center gap-1"
+                className="underline text-white flex items-center gap-1"
               >
                 <span>{deployedToken.tokenAddress}</span>
-                <ExternalLink className="w-3 h-3" />
+                <ExternalLink className="w-3 h-3" strokeWidth={1.6} />
               </a>
             </div>
           )}
 
-          <div className="pt-2 flex items-center space-x-3">
-            <Link
+          <div className="pt-1 flex flex-wrap items-center gap-3">
+            <TactileLink
               href={`/?pair=${deployedToken.tokenAddress !== '0x0000000000000000000000000000000000000000' ? deployedToken.tokenAddress : deployedToken.symbol}`}
-              className="px-4 py-2 bg-green-600 hover:bg-green-500 text-white rounded-xl font-bold flex items-center space-x-1.5 transition-all shadow-md"
+              variant="emerald"
+              className="px-4 py-2 text-xs space-x-1.5"
             >
               <span>Trade ${deployedToken.symbol} Now</span>
-              <ArrowRight className="w-4 h-4" />
-            </Link>
-            <Link
-              href="/explore"
-              className="px-4 py-2 bg-surface hover:bg-surface-hover border border-border text-gray-300 rounded-xl font-semibold transition-all"
-            >
-              <span>View in Explore Pools</span>
-            </Link>
+              <ArrowRight className="w-3.5 h-3.5" strokeWidth={1.75} />
+            </TactileLink>
+            <TactileLink href="/explore" variant="secondary" className="px-4 py-2 text-xs">
+              Explore Pools
+            </TactileLink>
           </div>
-        </div>
+        </SpotlightCard>
       )}
 
-      {/* Error Message */}
       {errorMessage && (
-        <div className="p-4 bg-red-950/40 border border-red-800 rounded-xl text-xs text-red-300 flex items-center space-x-2 animate-fadeIn">
-          <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+        <div className="p-4 bg-red-950/50 border border-red-800/70 rounded-xl text-xs text-red-300 flex items-center space-x-2">
+          <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" strokeWidth={1.6} />
           <span>{errorMessage}</span>
         </div>
       )}
 
-      <div className="bg-surface border border-border rounded-2xl p-6 sm:p-8 shadow-2xl space-y-6">
-        {/* Step 1: Launch Mode Selection */}
-        <div>
-          <label className="block text-sm font-semibold text-gray-200 mb-3">
-            Step 1: Choose Your Launch Path
+      <SpotlightCard className="p-6 sm:p-8 space-y-6">
+        {/* Step 1: Launch Mode */}
+        <div className="space-y-3">
+          <label className="text-[11px] uppercase tracking-micro font-medium text-muted block">
+            01 / Launch Architecture
           </label>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {/* Mode 2: Bonding Curve */}
-            <div
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+            <motion.button
+              type="button"
+              whileTap={{ scale: 0.99 }}
+              transition={snappySpring}
               onClick={() => setMode('CURVE')}
-              className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${
+              className={`p-4 rounded-xl border text-left transition-colors ${
                 mode === 'CURVE'
-                  ? 'border-primary bg-primary/10 shadow-md'
-                  : 'border-border bg-background/60 hover:border-gray-600'
+                  ? 'border-[#0052FF] bg-[#0052FF]/12'
+                  : 'border-white/[0.08] bg-[#080B10]/70 hover:border-white/[0.16]'
               }`}
             >
-              <div className="flex items-center space-x-2 text-primary font-bold text-base mb-1">
-                <Rocket className="w-5 h-5" />
+              <div className="flex items-center space-x-2 text-[#7CA8FF] font-display font-semibold text-base mb-1">
+                <Rocket className="w-4 h-4" strokeWidth={1.75} />
                 <span>Fair Launch Curve</span>
               </div>
-              <p className="text-xs text-gray-400 leading-relaxed">
-                Zero capital needed upfront. Community trades along an AMM curve until 50 canonical equity shares are accumulated, then migrates automatically to Uniswap v4.
+              <p className="text-xs text-muted leading-relaxed">
+                Zero upfront capital required. Community trades on an autonomous AMM curve until 50 canonical shares accumulate, then graduates to Uniswap v4.
               </p>
-            </div>
+            </motion.button>
 
-            {/* Mode 1: Instant Pool */}
-            <div
+            <motion.button
+              type="button"
+              whileTap={{ scale: 0.99 }}
+              transition={snappySpring}
               onClick={() => setMode('INSTANT')}
-              className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${
+              className={`p-4 rounded-xl border text-left transition-colors ${
                 mode === 'INSTANT'
-                  ? 'border-primary bg-primary/10 shadow-md'
-                  : 'border-border bg-background/60 hover:border-gray-600'
+                  ? 'border-[#00E599] bg-[#00E599]/10'
+                  : 'border-white/[0.08] bg-[#080B10]/70 hover:border-white/[0.16]'
               }`}
             >
-              <div className="flex items-center space-x-2 text-warning font-bold text-base mb-1">
-                <Flame className="w-5 h-5" />
+              <div className="flex items-center space-x-2 text-[#00E599] font-display font-semibold text-base mb-1">
+                <Flame className="w-4 h-4" strokeWidth={1.75} />
                 <span>Instant Uniswap v4</span>
               </div>
-              <p className="text-xs text-gray-400 leading-relaxed">
-                For creators with capital. Seeds a permanent Uniswap v4 pool immediately. 100% of liquidity is minted to 0x...dEaD forever.
+              <p className="text-xs text-muted leading-relaxed">
+                Seed initial stock liquidity directly into Uniswap v4 PoolManager. 100% of LP positions mint permanently to 0x...dEaD.
               </p>
-            </div>
+            </motion.button>
           </div>
         </div>
 
-        {/* Step 2: Pairing Asset Selection */}
-        <div>
-          <label className="block text-sm font-semibold text-gray-200 mb-2">
-            Step 2: Select Pairing Stock Asset (Coinbase B20 Standard)
+        {/* Step 2: Pairing Equity */}
+        <div className="space-y-2.5">
+          <label className="text-[11px] uppercase tracking-micro font-medium text-muted block">
+            02 / Paired Coinbase B20 Equity
           </label>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
             {VERIFIED_B20_STOCKS.map((stock) => {
               const selected = selectedStock.symbol === stock.symbol;
               return (
-                <div
+                <motion.button
                   key={stock.symbol}
+                  type="button"
+                  whileTap={{ scale: 0.97 }}
+                  transition={snappySpring}
                   onClick={() => setSelectedStock(stock)}
-                  className={`p-3 rounded-xl border cursor-pointer text-center transition-all ${
+                  className={`p-3 rounded-xl border text-left transition-colors flex flex-col justify-between space-y-2 ${
                     selected
-                      ? 'border-primary bg-primary/10'
-                      : 'border-border bg-background/40 hover:border-gray-700'
+                      ? 'border-[#00E599]/60 bg-[#00E599]/10'
+                      : 'border-white/[0.07] bg-[#080B10]/70 hover:border-white/[0.15]'
                   }`}
                 >
-                  <div className="font-bold text-white text-sm">{stock.symbol}</div>
-                  <div className="text-[11px] text-gray-400">{stock.name}</div>
-                  <div className="mt-1 text-[10px] text-primary flex items-center justify-center gap-1 font-semibold">
-                    <ShieldCheck className="w-3 h-3" />
-                    Verified B20
+                  <div className="flex items-center justify-between">
+                    <StockEquityBadge symbol={stock.symbol} size="sm" />
+                    <ShieldCheck
+                      className={`w-3.5 h-3.5 ${selected ? 'text-[#00E599]' : 'text-muted'}`}
+                      strokeWidth={1.6}
+                    />
                   </div>
-                </div>
+                  <div>
+                    <div className="font-semibold text-white text-xs">{stock.symbol}</div>
+                    <div className="text-[10px] text-muted truncate">{stock.name}</div>
+                  </div>
+                </motion.button>
               );
             })}
           </div>
         </div>
 
-        {/* Step 3: Token Metadata */}
-        <div>
-          <label className="block text-sm font-semibold text-gray-200 mb-2">
-            Step 3: Token Details
+        {/* Step 3: Metadata */}
+        <div className="space-y-2.5">
+          <label className="text-[11px] uppercase tracking-micro font-medium text-muted block">
+            03 / Token Identity
           </label>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <span className="text-xs text-gray-400 block mb-1">Token Name</span>
+              <span className="text-xs text-muted block mb-1">Token Name</span>
               <input
                 type="text"
                 value={tokenName}
                 onChange={(e) => setTokenName(e.target.value)}
-                placeholder="e.g. Bull Moon"
-                className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-primary"
+                placeholder="e.g. Base Equity Index"
+                className="w-full bg-[#080B10] border border-white/[0.08] rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-[#0052FF]"
               />
             </div>
 
             <div>
-              <span className="text-xs text-gray-400 block mb-1">Ticker / Symbol</span>
+              <span className="text-xs text-muted block mb-1">Ticker Symbol</span>
               <input
                 type="text"
                 value={tokenSymbol}
                 onChange={(e) => setTokenSymbol(e.target.value.toUpperCase())}
-                placeholder="e.g. BULL"
-                className="w-full bg-background border border-border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none focus:border-primary"
+                placeholder="e.g. BEQ"
+                className="w-full bg-[#080B10] border border-white/[0.08] rounded-xl px-4 py-2.5 font-mono text-sm text-white focus:outline-none focus:border-[#0052FF]"
               />
             </div>
           </div>
         </div>
 
-        {/* Instant Pool Seed Amount (Conditional) */}
         {mode === 'INSTANT' && (
-          <div className="p-4 bg-background border border-warning/30 rounded-xl space-y-3">
-            <div className="flex justify-between items-center">
-              <span className="text-sm font-semibold text-warning flex items-center gap-1.5">
-                <Flame className="w-4 h-4" />
-                Initial {selectedStock.symbol} Liquidity Deposit
+          <div className="p-4 bg-[#080B10] border border-[#00E599]/30 rounded-xl space-y-3">
+            <div className="flex justify-between items-center text-xs">
+              <span className="font-semibold text-[#00E599] flex items-center gap-1.5">
+                <Flame className="w-4 h-4" strokeWidth={1.6} />
+                Initial {selectedStock.symbol} Deposit
               </span>
-              <div className="flex items-center space-x-1.5 text-xs text-gray-400">
-                <span>Balance: {userStockBalance.toFixed(2)} {selectedStock.symbol}</span>
+              <div className="flex items-center space-x-2 font-mono text-muted">
+                <span>
+                  Bal: {userStockBalance.toFixed(2)} {selectedStock.symbol}
+                </span>
                 {isSepolia && (
                   <button
+                    type="button"
                     onClick={() => setIsFaucetOpen(true)}
-                    className="text-emerald-400 underline hover:text-emerald-300 font-semibold"
+                    className="text-[#00E599] underline font-semibold"
                   >
                     +Faucet
                   </button>
@@ -291,83 +312,61 @@ export default function LaunchPage() {
               type="number"
               value={initialDeposit}
               onChange={(e) => setInitialDeposit(e.target.value)}
-              placeholder="e.g. 5"
-              className="w-full bg-surface border border-border rounded-xl px-4 py-2.5 text-sm text-white focus:outline-none"
+              placeholder="5"
+              className="w-full bg-[#0E141C] border border-white/[0.08] rounded-xl px-4 py-2.5 font-mono text-sm text-white focus:outline-none focus:border-[#00E599]"
             />
 
             {!hasEnoughDeposit && (
               <p className="text-xs text-red-400 flex items-center gap-1">
-                <AlertTriangle className="w-3.5 h-3.5" />
-                Insufficient {selectedStock.symbol} balance. Claim more from the Stock Faucet above.
+                <AlertTriangle className="w-3.5 h-3.5" strokeWidth={1.6} />
+                Insufficient {selectedStock.symbol} balance. Claim from the Stock Faucet first.
               </p>
             )}
-
-            <p className="text-xs text-gray-400">
-              This {selectedStock.symbol} will be paired with 1,000,000,000 newly minted {tokenSymbol || 'tokens'} in Uniswap v4 and permanently burned to 0x...dEaD.
-            </p>
           </div>
         )}
 
-        {/* Step 4: Optional Anti-Sniper Fair Launch Limit (Bonding Curve Only) */}
+        {/* Step 4: Anti-Sniper Cap */}
         {mode === 'CURVE' && (
-          <div className="p-4 bg-background/70 border border-border rounded-xl space-y-2">
+          <div className="p-4 bg-[#080B10] border border-white/[0.07] rounded-xl space-y-2.5">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
-                <ShieldCheck className="w-4 h-4 text-primary" />
-                <span className="text-xs font-semibold text-white">Anti-Sniper Fair Launch Cap</span>
+                <ShieldCheck className="w-4 h-4 text-[#00E599]" strokeWidth={1.6} />
+                <span className="text-xs font-semibold text-white">Anti-Sniper Max Wallet Limit</span>
               </div>
-              <span className="text-[11px] text-gray-400">Curve Phase Only</span>
+              <span className="text-[10px] font-mono uppercase tracking-micro text-muted">
+                Active Until v4 Graduation
+              </span>
             </div>
 
-            <p className="text-[11px] text-gray-400 leading-relaxed">
-              Restricts any single wallet from cornering the supply during early curve trading. Deactivates automatically upon graduation to Uniswap v4.
-            </p>
-
             <div className="grid grid-cols-3 gap-2 pt-1 text-xs">
-              <button
-                type="button"
-                onClick={() => setAntiDumpMode('2%')}
-                className={`py-2 rounded-lg border font-semibold transition-all ${
-                  antiDumpMode === '2%'
-                    ? 'border-primary bg-primary/10 text-white'
-                    : 'border-border bg-surface text-gray-400 hover:text-white'
-                }`}
-              >
-                2% Max Wallet (Rec.)
-              </button>
-              <button
-                type="button"
-                onClick={() => setAntiDumpMode('1%')}
-                className={`py-2 rounded-lg border font-semibold transition-all ${
-                  antiDumpMode === '1%'
-                    ? 'border-primary bg-primary/10 text-white'
-                    : 'border-border bg-surface text-gray-400 hover:text-white'
-                }`}
-              >
-                1% Max (Strict)
-              </button>
-              <button
-                type="button"
-                onClick={() => setAntiDumpMode('OFF')}
-                className={`py-2 rounded-lg border font-semibold transition-all ${
-                  antiDumpMode === 'OFF'
-                    ? 'border-primary bg-primary/10 text-white'
-                    : 'border-border bg-surface text-gray-400 hover:text-white'
-                }`}
-              >
-                Disabled (Unlimited)
-              </button>
+              {(['2%', '1%', 'OFF'] as const).map((cap) => {
+                const active = antiDumpMode === cap;
+                return (
+                  <button
+                    key={cap}
+                    type="button"
+                    onClick={() => setAntiDumpMode(cap)}
+                    className={`relative py-2 rounded-lg font-medium border transition-colors ${
+                      active
+                        ? 'text-white border-[#0052FF] bg-[#0052FF]/15'
+                        : 'border-white/[0.08] bg-[#0E141C] text-muted hover:text-white'
+                    }`}
+                  >
+                    {cap === '2%' ? '2% Max (Rec.)' : cap === '1%' ? '1% Strict' : 'Unlimited'}
+                  </button>
+                );
+              })}
             </div>
           </div>
         )}
 
-        {/* Step 5: Creator Fee & Redirection */}
+        {/* Step 5: Creator Fees & Treasury Routing */}
         <div className="space-y-3">
           <div className="flex justify-between items-center">
-            <label className="text-sm font-semibold text-gray-200">
-              Step 5: Creator Fee ({creatorFee}%)
+            <label className="text-[11px] uppercase tracking-micro font-medium text-muted">
+              04 / Creator Fee ({creatorFee.toFixed(1)}%)
             </label>
-            <span className="text-xs text-gray-400">Hard limit: 2.5% max</span>
+            <span className="font-mono text-[11px] text-muted">Cap: 2.5% Max</span>
           </div>
 
           <input
@@ -377,115 +376,85 @@ export default function LaunchPage() {
             step="0.1"
             value={creatorFee}
             onChange={(e) => setCreatorFee(parseFloat(e.target.value))}
-            className="w-full accent-primary cursor-pointer"
+            className="w-full accent-[#00E599] cursor-pointer"
           />
 
-          {/* Fee Redirection Options */}
-          <div className="mt-2 space-y-2">
-            <span className="text-xs text-gray-400 block font-medium">Fee Destination Routing:</span>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
-              <button
-                type="button"
-                onClick={() => setFeeDestination('CREATOR')}
-                className={`p-2.5 rounded-lg border text-left transition-all ${
-                  feeDestination === 'CREATOR'
-                    ? 'border-primary bg-primary/10 text-white font-medium'
-                    : 'border-border bg-background/40 text-gray-400 hover:text-white'
-                }`}
-              >
-                My Connected Wallet
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setFeeDestination('STOCK_TREASURY')}
-                className={`p-2.5 rounded-lg border text-left transition-all ${
-                  feeDestination === 'STOCK_TREASURY'
-                    ? 'border-primary bg-primary/10 text-white font-medium'
-                    : 'border-border bg-background/40 text-gray-400 hover:text-white'
-                }`}
-              >
-                Stock Treasury (Buy & Burn)
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setFeeDestination('CUSTOM')}
-                className={`p-2.5 rounded-lg border text-left transition-all ${
-                  feeDestination === 'CUSTOM'
-                    ? 'border-primary bg-primary/10 text-white font-medium'
-                    : 'border-border bg-background/40 text-gray-400 hover:text-white'
-                }`}
-              >
-                Custom DAO / Split
-              </button>
-            </div>
-
-            {feeDestination === 'CUSTOM' && (
-              <input
-                type="text"
-                value={customRecipient}
-                onChange={(e) => setCustomRecipient(e.target.value)}
-                placeholder="0x... Recipient Address"
-                className="w-full bg-background border border-border rounded-xl px-4 py-2 text-xs text-white focus:outline-none"
-              />
-            )}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
+            {[
+              { key: 'CREATOR' as const, label: 'Connected Wallet' },
+              { key: 'STOCK_TREASURY' as const, label: 'Stock Treasury Burn' },
+              { key: 'CUSTOM' as const, label: 'Custom DAO / Vault' },
+            ].map((dest) => {
+              const active = feeDestination === dest.key;
+              return (
+                <button
+                  key={dest.key}
+                  type="button"
+                  onClick={() => setFeeDestination(dest.key)}
+                  className={`p-2.5 rounded-xl border text-left font-medium transition-colors ${
+                    active
+                      ? 'border-[#00E599]/60 bg-[#00E599]/10 text-white'
+                      : 'border-white/[0.07] bg-[#080B10]/70 text-muted hover:text-white'
+                  }`}
+                >
+                  {dest.label}
+                </button>
+              );
+            })}
           </div>
+
+          {feeDestination === 'CUSTOM' && (
+            <input
+              type="text"
+              value={customRecipient}
+              onChange={(e) => setCustomRecipient(e.target.value)}
+              placeholder="0x... Custom Recipient Address"
+              className="w-full bg-[#080B10] border border-white/[0.08] rounded-xl px-4 py-2.5 font-mono text-xs text-white focus:outline-none focus:border-[#0052FF]"
+            />
+          )}
         </div>
 
-        {/* Security & Verification Callout */}
-        <div className="p-3.5 bg-blue-950/20 border border-blue-900/40 rounded-xl text-xs text-blue-300 space-y-1">
-          <div className="flex items-center gap-1 font-semibold">
-            <CheckCircle2 className="w-3.5 h-3.5" />
-            Official Factory Launch Guarantee
-          </div>
-          <p className="text-blue-300/80 text-[11px] leading-relaxed">
-            Every token launched receives cryptographic verification (`isOfficialLaunch`). Total supply is capped at 1B with no minting or burning functions. 100% of liquidity is burned permanently to 0x...dEaD.
-          </p>
-        </div>
-
-        {/* Launch Button */}
+        {/* Submit */}
         <div>
           {!isConnected ? (
-            <button
-              disabled
-              className="w-full py-4 bg-surface-hover border border-border text-gray-400 rounded-xl font-medium cursor-not-allowed text-xs"
-            >
-              Connect Wallet to Deploy
-            </button>
+            <TactileButton disabled variant="secondary" className="w-full py-4 text-xs">
+              Connect Wallet to Deploy On-Chain
+            </TactileButton>
           ) : isMainnet && isMainnetPaused ? (
-            <button
+            <TactileButton
+              variant="secondary"
               onClick={() => switchChain?.({ chainId: baseSepolia.id })}
-              className="w-full py-4 bg-amber-900/60 hover:bg-amber-800/80 border border-amber-700 text-amber-200 rounded-xl font-bold transition-all text-xs flex items-center justify-center space-x-2"
+              className="w-full py-4 text-xs space-x-2 border-amber-700/70 text-amber-200"
             >
-              <Pause className="w-4 h-4 text-amber-400" />
-              <span>Mainnet Paused — Switch to Base Sepolia Testnet</span>
-            </button>
+              <Pause className="w-4 h-4 text-amber-400" strokeWidth={1.75} />
+              <span>Mainnet Paused — Switch to Base Sepolia</span>
+            </TactileButton>
           ) : mode === 'INSTANT' && !hasEnoughDeposit ? (
-            <button
-              disabled
-              className="w-full py-4 bg-surface-hover border border-border text-gray-500 rounded-xl font-bold cursor-not-allowed text-xs"
-            >
+            <TactileButton disabled variant="secondary" className="w-full py-4 text-xs">
               Insufficient {selectedStock.symbol} Balance for Deposit
-            </button>
+            </TactileButton>
           ) : (
-            <button
+            <TactileButton
+              variant="emerald"
               disabled={isSubmitting || !tokenName || !tokenSymbol}
               onClick={handleLaunch}
-              className="w-full py-4 bg-primary hover:bg-primary-hover disabled:bg-surface-hover disabled:text-gray-500 text-white rounded-xl font-bold transition-all shadow-lg shadow-primary/25 text-xs flex items-center justify-center space-x-2"
+              className="w-full py-4 text-xs space-x-2"
             >
               {isSubmitting ? (
                 <>
-                  <RefreshCw className="w-4 h-4 animate-spin" />
-                  <span>Confirming Deployment in Wallet...</span>
+                  <RefreshCw className="w-4 h-4 animate-spin" strokeWidth={1.75} />
+                  <span>Confirming Deployment on Base Sepolia...</span>
                 </>
               ) : (
-                <span>Launch {tokenSymbol ? `$${tokenSymbol}` : 'Token'} Now</span>
+                <>
+                  <Rocket className="w-4 h-4" strokeWidth={1.75} />
+                  <span>Deploy {tokenSymbol ? `$${tokenSymbol}` : 'Token'} On-Chain</span>
+                </>
               )}
-            </button>
+            </TactileButton>
           )}
         </div>
-      </div>
+      </SpotlightCard>
     </div>
   );
 }

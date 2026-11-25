@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { useAccount, useChainId, useSwitchChain } from 'wagmi';
 import { base, baseSepolia } from 'wagmi/chains';
+import { motion, AnimatePresence } from 'framer-motion';
 import {
   AlertTriangle,
   Droplets,
@@ -13,14 +14,16 @@ import {
   CheckCircle2,
   X,
   ExternalLink,
-  ShieldAlert,
   Menu,
   Rocket,
   Layers,
   Building2,
   ArrowRightLeft,
+  BookOpen,
 } from 'lucide-react';
 import { useProtocol } from '../context/ProtocolContext';
+import { BulldotLogo, BaseNetworkMark, StockEquityBadge } from './BrandAssets';
+import { TactileButton, snappySpring, gentleSpring } from './MotionPrimitives';
 
 export function Header() {
   const pathname = usePathname();
@@ -28,13 +31,13 @@ export function Header() {
   const { switchChain } = useSwitchChain();
   const { isConnected } = useAccount();
   const {
+    ethBalance,
     stockBalances,
     claimFaucet,
     isFaucetOpen,
     setIsFaucetOpen,
     faucetSuccessMsg,
     faucetTxHash,
-    clearFaucetMsg,
   } = useProtocol();
 
   const isSepolia = chainId === baseSepolia.id;
@@ -79,59 +82,85 @@ export function Header() {
   };
 
   const navLinks = [
-    { label: 'Trade / Swap', href: '/', icon: ArrowRightLeft },
-    { label: 'Launch Token', href: '/launch', icon: Rocket },
-    { label: 'Explore Pools', href: '/explore', icon: Layers },
-    { label: 'Creator Hub', href: '/dashboard', icon: Building2 },
+    { label: 'Trade', href: '/', icon: ArrowRightLeft },
+    { label: 'Launch', href: '/launch', icon: Rocket },
+    { label: 'Explore', href: '/explore', icon: Layers },
+    { label: 'Creator', href: '/dashboard', icon: Building2 },
+    { label: 'Docs', href: '/docs', icon: BookOpen },
   ];
 
   return (
     <>
       {/* Persistent Mainnet Paused Banner */}
-      {isMainnet && (
-        <div className="bg-amber-950/90 border-b border-amber-800 text-amber-200 px-4 py-2 text-xs flex flex-wrap items-center justify-between gap-2 z-50">
-          <div className="flex items-center space-x-2">
-            <Pause className="w-4 h-4 text-amber-400 shrink-0" />
-            <span>
-              <strong>Base Mainnet Contracts Paused:</strong> Mainnet trading is paused pending Coinbase's official B20 tokenized equity deployments. Switch to Base Sepolia Testnet to test live DEX swaps, launches, and fee redirection with testnet stocks.
-            </span>
-          </div>
-          <button
-            onClick={() => switchChain?.({ chainId: baseSepolia.id })}
-            className="px-3 py-1 bg-amber-500 hover:bg-amber-400 text-black font-bold rounded-lg transition-colors whitespace-nowrap"
+      <AnimatePresence>
+        {isMainnet && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={gentleSpring}
+            className="bg-amber-950/90 border-b border-amber-800/70 text-amber-200 px-4 py-2 text-xs z-50 overflow-hidden"
           >
-            Switch to Base Sepolia Testnet
-          </button>
-        </div>
-      )}
+            <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center space-x-2">
+                <Pause className="w-4 h-4 text-amber-400 shrink-0" strokeWidth={1.6} />
+                <span>
+                  <strong className="text-white">Base Mainnet Paused:</strong> Mainnet pools are paused pending official Coinbase B20 rollout. Switch to Base Sepolia Testnet for live swaps and launches.
+                </span>
+              </div>
+              <TactileButton
+                variant="emerald"
+                onClick={() => switchChain?.({ chainId: baseSepolia.id })}
+                className="px-3 py-1 text-[11px] rounded-lg whitespace-nowrap"
+              >
+                Switch to Base Sepolia
+              </TactileButton>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Global Header */}
-      <header className="sticky top-0 z-40 bg-background/90 backdrop-blur-md border-b border-border">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          {/* Brand & Desktop Nav */}
+      <header className="sticky top-0 z-40 bg-[#080B10]/85 backdrop-blur-xl border-b border-white/[0.08]">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-3">
+          {/* Brand & Spring Navigation */}
           <div className="flex items-center space-x-6 lg:space-x-8">
-            <Link href="/" className="flex items-center space-x-2">
-              <span className="text-2xl">🐂</span>
-              <span className="font-bold text-xl tracking-tight text-white">
-                bulldot<span className="text-primary">.xyz</span>
-              </span>
+            <Link href="/" className="flex items-center space-x-2.5 group">
+              <motion.div whileHover={{ rotate: -4, scale: 1.04 }} transition={snappySpring}>
+                <BulldotLogo size={32} />
+              </motion.div>
+              <div className="flex items-baseline space-x-1.5">
+                <span className="font-display font-semibold text-lg sm:text-xl tracking-display text-white">
+                  bulldot<span className="text-[#00E599]">.xyz</span>
+                </span>
+                <span className="hidden lg:inline-block text-[10px] font-mono uppercase tracking-micro text-muted border border-white/[0.08] bg-white/[0.03] px-1.5 py-0.5 rounded">
+                  v4
+                </span>
+              </div>
             </Link>
 
-            {/* Navigation Links (Desktop) */}
-            <nav className="hidden md:flex items-center space-x-1">
+            {/* Desktop Pill Nav with Framer Motion layoutId */}
+            <nav className="hidden md:flex items-center p-1 rounded-xl bg-[#0E141C] border border-white/[0.07]">
               {navLinks.map((link) => {
                 const active = pathname === link.href;
                 return (
                   <Link
                     key={link.href}
                     href={link.href}
-                    className={`px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                      active
-                        ? 'bg-surface text-white border border-border shadow-sm'
-                        : 'text-gray-400 hover:text-white hover:bg-surface/50'
+                    className={`relative px-3.5 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                      active ? 'text-white' : 'text-muted hover:text-ink'
                     }`}
                   >
-                    {link.label}
+                    {active && (
+                      <motion.span
+                        layoutId="header-nav-pill"
+                        transition={snappySpring}
+                        className="absolute inset-0 rounded-lg bg-[#162030] border border-[#0052FF]/45 shadow-[0_0_16px_-4px_rgba(0,82,255,0.45)]"
+                      />
+                    )}
+                    <span className="relative z-10 flex items-center space-x-1.5">
+                      <span>{link.label}</span>
+                    </span>
                   </Link>
                 );
               })}
@@ -139,52 +168,59 @@ export function Header() {
           </div>
 
           {/* Right Actions */}
-          <div className="flex items-center space-x-2 sm:space-x-3">
-            {/* Testnet Stock Faucet Pill (Desktop / Tablet) */}
+          <div className="flex items-center space-x-1.5 sm:space-x-2.5 shrink-0">
             {isSepolia && (
-              <button
+              <motion.button
+                whileHover={{ y: -1 }}
+                whileTap={{ scale: 0.97 }}
+                transition={snappySpring}
                 onClick={() => setIsFaucetOpen(true)}
-                className="flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-emerald-950/60 text-emerald-300 border border-emerald-800 hover:bg-emerald-900/60 transition-all shadow-sm"
-                title="Claim free Base Sepolia testnet stocks (bCOIN, bNVDA, etc.)"
+                className="hidden sm:flex items-center space-x-1.5 px-3 py-1.5 rounded-xl text-xs font-medium bg-[#00E599]/10 text-[#00E599] border border-[#00E599]/30 hover:bg-[#00E599]/15 transition-colors"
+                title="Claim free Base Sepolia testnet stocks (bCOIN, bNVDA, bAAPL, bTSLA)"
               >
-                <Droplets className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="hidden sm:inline">Stock Faucet</span>
-                <span className="sm:hidden">Faucet</span>
-              </button>
+                <Droplets className="w-3.5 h-3.5" strokeWidth={1.75} />
+                <span>Stock Faucet</span>
+              </motion.button>
             )}
 
-            {/* Network Selector Pill */}
+            {/* Network Pill */}
             {isConnected && (
               <>
                 {!isSupported ? (
-                  <button
+                  <motion.button
+                    whileTap={{ scale: 0.97 }}
+                    transition={snappySpring}
                     onClick={() => switchChain?.({ chainId: baseSepolia.id })}
-                    className="flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-semibold bg-red-950/60 text-red-300 border border-red-800 hover:bg-red-900/60 transition-colors"
+                    className="flex items-center space-x-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl text-xs font-medium bg-red-950/60 text-red-300 border border-red-800/70 hover:bg-red-900/60 transition-colors"
                   >
-                    <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
+                    <AlertTriangle className="w-3.5 h-3.5 text-red-400" strokeWidth={1.6} />
                     <span className="hidden sm:inline">Switch to Base Sepolia</span>
                     <span className="sm:hidden">Wrong Net</span>
-                  </button>
+                  </motion.button>
                 ) : isSepolia ? (
-                  <button
+                  <motion.button
+                    whileTap={{ scale: 0.97 }}
+                    transition={snappySpring}
                     onClick={() => switchChain?.({ chainId: base.id })}
-                    className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium border bg-amber-950/40 text-amber-300 border-amber-800/60 hover:bg-amber-900/40 transition-colors"
-                    title="Active on Base Sepolia Testnet. Click to view Mainnet state."
+                    className="flex items-center space-x-1.5 px-2 sm:px-2.5 py-1.5 rounded-xl text-xs font-medium border bg-[#0052FF]/12 text-[#80AAFF] border-[#0052FF]/35 hover:bg-[#0052FF]/20 transition-colors"
+                    title="Live on Base Sepolia Testnet. Click to inspect Base Mainnet state."
                   >
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                    <span className="font-semibold hidden sm:inline">Base Sepolia (Testnet)</span>
-                    <span className="font-semibold sm:hidden">Sepolia</span>
-                  </button>
+                    <BaseNetworkMark size={14} />
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#00E599] animate-pulse" />
+                    <span className="font-medium hidden sm:inline">Base Sepolia</span>
+                  </motion.button>
                 ) : (
-                  <button
+                  <motion.button
+                    whileTap={{ scale: 0.97 }}
+                    transition={snappySpring}
                     onClick={() => switchChain?.({ chainId: baseSepolia.id })}
-                    className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-full text-xs font-medium border bg-zinc-900/80 text-zinc-400 border-zinc-700 hover:bg-zinc-800 transition-colors"
-                    title="Mainnet contracts are paused. Click to switch to Base Sepolia Testnet."
+                    className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-xl text-xs font-medium border bg-surface text-muted border-white/10 hover:text-white transition-colors"
+                    title="Mainnet paused. Click to switch back to Base Sepolia."
                   >
-                    <Pause className="w-3 h-3 text-amber-500" />
-                    <span className="hidden sm:inline">Base Mainnet (Paused)</span>
+                    <Pause className="w-3 h-3 text-amber-400" strokeWidth={1.75} />
+                    <span className="hidden sm:inline">Base (Paused)</span>
                     <span className="sm:hidden">Paused</span>
-                  </button>
+                  </motion.button>
                 )}
               </>
             )}
@@ -198,176 +234,229 @@ export function Header() {
               }}
             />
 
-            {/* Mobile Hamburger Toggle Button */}
-            <button
+            {/* Mobile Hamburger Toggle */}
+            <motion.button
+              whileTap={{ scale: 0.95 }}
+              transition={snappySpring}
               onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-              className="md:hidden p-2 rounded-xl border border-border bg-surface text-gray-300 hover:text-white hover:bg-surface-hover transition-colors"
+              className="md:hidden p-2 rounded-xl border border-white/[0.08] bg-[#0E141C] text-muted hover:text-white transition-colors"
               aria-label="Toggle Navigation Menu"
             >
-              {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-            </button>
+              {isMobileMenuOpen ? (
+                <X className="w-5 h-5" strokeWidth={1.6} />
+              ) : (
+                <Menu className="w-5 h-5" strokeWidth={1.6} />
+              )}
+            </motion.button>
           </div>
         </div>
 
-        {/* Mobile Dropdown Drawer Menu */}
-        {isMobileMenuOpen && (
-          <div className="md:hidden bg-surface border-b border-border px-4 py-4 space-y-3 animate-fadeIn">
-            <div className="grid grid-cols-2 gap-2">
-              {navLinks.map((link) => {
-                const Icon = link.icon;
-                const active = pathname === link.href;
-                return (
-                  <Link
-                    key={link.href}
-                    href={link.href}
-                    onClick={() => setIsMobileMenuOpen(false)}
-                    className={`p-3 rounded-xl flex items-center space-x-2 text-xs font-semibold border transition-all ${
-                      active
-                        ? 'bg-primary text-white border-primary shadow-sm'
-                        : 'bg-background/60 text-gray-300 border-border hover:border-gray-600 hover:text-white'
-                    }`}
-                  >
-                    <Icon className="w-4 h-4 text-primary" />
-                    <span>{link.label}</span>
-                  </Link>
-                );
-              })}
-            </div>
+        {/* Mobile Dropdown Drawer */}
+        <AnimatePresence>
+          {isMobileMenuOpen && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={snappySpring}
+              className="md:hidden bg-[#0E141C] border-b border-white/[0.08] px-4 py-4 space-y-3"
+            >
+              <div className="grid grid-cols-2 gap-2">
+                {navLinks.map((link) => {
+                  const Icon = link.icon;
+                  const active = pathname === link.href;
+                  return (
+                    <Link
+                      key={link.href}
+                      href={link.href}
+                      onClick={() => setIsMobileMenuOpen(false)}
+                      className={`p-3 rounded-xl flex items-center space-x-2 text-xs font-medium border transition-colors ${
+                        active
+                          ? 'bg-[#0052FF] text-white border-[#0052FF]'
+                          : 'bg-[#080B10]/70 text-muted border-white/[0.08] hover:text-white'
+                      }`}
+                    >
+                      <Icon className="w-4 h-4" strokeWidth={1.6} />
+                      <span>{link.label}</span>
+                    </Link>
+                  );
+                })}
+              </div>
 
-            {/* Mobile Faucet Callout */}
-            {isSepolia && (
-              <button
-                onClick={() => {
-                  setIsMobileMenuOpen(false);
-                  setIsFaucetOpen(true);
-                }}
-                className="w-full py-2.5 px-4 rounded-xl bg-emerald-950/60 border border-emerald-800 text-emerald-300 font-semibold text-xs flex items-center justify-center space-x-2"
-              >
-                <Droplets className="w-4 h-4 text-emerald-400" />
-                <span>Open Testnet Stock Faucet (+100 bCOIN)</span>
-              </button>
-            )}
-          </div>
-        )}
+              {isSepolia && (
+                <TactileButton
+                  variant="emerald"
+                  onClick={() => {
+                    setIsMobileMenuOpen(false);
+                    setIsFaucetOpen(true);
+                  }}
+                  className="w-full py-2.5 text-xs space-x-2"
+                >
+                  <Droplets className="w-4 h-4" strokeWidth={1.75} />
+                  <span>Open Testnet Stock Faucet</span>
+                </TactileButton>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </header>
 
       {/* Stock Faucet Modal */}
-      {isFaucetOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn">
-          <div className="bg-surface border border-border rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5">
-            <div className="flex items-center justify-between pb-3 border-b border-border">
-              <div className="flex items-center space-x-2">
-                <div className="p-2 rounded-xl bg-emerald-950/60 text-emerald-400 border border-emerald-800">
-                  <Droplets className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-bold text-white">Base Sepolia Stock Faucet</h3>
-                  <p className="text-xs text-gray-400">Claim testnet tokenized equities for testing</p>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsFaucetOpen(false)}
-                className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-background transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {/* Faucet Notification */}
-            {faucetSuccessMsg && (
-              <div className="p-3 bg-emerald-950/60 border border-emerald-800 rounded-xl text-xs text-emerald-300 flex items-center justify-between gap-2 animate-fadeIn">
-                <div className="flex items-center space-x-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                  <span>{faucetSuccessMsg}</span>
-                </div>
-                {faucetTxHash && (
-                  <a
-                    href={`https://sepolia.basescan.org/tx/${faucetTxHash}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="flex items-center space-x-1 underline hover:text-white shrink-0"
-                  >
-                    <span>BaseScan</span>
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
-                )}
-              </div>
-            )}
-
-            {faucetError && (
-              <div className="p-3 bg-red-950/60 border border-red-800 rounded-xl text-xs text-red-300 flex items-center space-x-2 animate-fadeIn">
-                <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
-                <span>{faucetError}</span>
-              </div>
-            )}
-
-            {/* Balances summary */}
-            <div className="p-3.5 bg-background border border-border/80 rounded-xl space-y-2">
-              <span className="text-xs text-gray-400 font-medium block">Your Current Testnet Equities:</span>
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                {['bCOIN', 'bNVDA', 'bAAPL', 'bTSLA'].map((sym) => (
-                  <div key={sym} className="flex justify-between p-2 rounded-lg bg-surface border border-border">
-                    <span className="text-gray-400">{sym}:</span>
-                    <span className="font-bold text-white">{stockBalances[sym]?.toFixed(1) || '0.0'}</span>
+      <AnimatePresence>
+        {isFaucetOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.96, y: 12 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.96, y: 12 }}
+              transition={snappySpring}
+              className="bg-[#0E141C] border border-white/[0.12] rounded-2xl max-w-md w-full max-h-[90vh] overflow-y-auto p-5 sm:p-6 shadow-tactile-card space-y-5"
+            >
+              <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
+                <div className="flex items-center space-x-3">
+                  <div className="p-2.5 rounded-xl bg-[#00E599]/10 text-[#00E599] border border-[#00E599]/30">
+                    <Droplets className="w-5 h-5" strokeWidth={1.6} />
                   </div>
-                ))}
+                  <div>
+                    <h3 className="font-display text-lg font-semibold text-white tracking-tight">
+                      Testnet Equity Faucet
+                    </h3>
+                    <p className="text-xs text-muted">
+                      On-chain MockB20Stock minting on Base Sepolia
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setIsFaucetOpen(false)}
+                  className="text-muted hover:text-white p-1.5 rounded-lg hover:bg-white/[0.05] transition-colors"
+                >
+                  <X className="w-4 h-4" strokeWidth={1.75} />
+                </button>
               </div>
-            </div>
 
-            {/* Stock selector to claim */}
-            <div className="space-y-2">
-              <label className="text-xs font-semibold text-gray-300 block">Select Asset to Claim (+100 Tokens):</label>
-              <div className="grid grid-cols-2 gap-2">
-                {[
-                  { sym: 'bCOIN', name: 'Coinbase Stock' },
-                  { sym: 'bNVDA', name: 'Nvidia Stock' },
-                  { sym: 'bAAPL', name: 'Apple Stock' },
-                  { sym: 'bTSLA', name: 'Tesla Stock' },
-                ].map((item) => (
-                  <button
-                    key={item.sym}
-                    onClick={() => setSelectedStock(item.sym)}
-                    className={`p-2.5 rounded-xl border text-left transition-all ${
-                      selectedStock === item.sym
-                        ? 'border-emerald-500 bg-emerald-950/40 text-white font-bold'
-                        : 'border-border bg-background/50 text-gray-300 hover:border-gray-600'
-                    }`}
-                  >
-                    <span className="block text-xs font-bold">{item.sym}</span>
-                    <span className="block text-[10px] text-gray-400">{item.name}</span>
-                  </button>
-                ))}
+              {faucetSuccessMsg && (
+                <div className="p-3 bg-[#00E599]/10 border border-[#00E599]/35 rounded-xl text-xs text-[#00E599] flex items-center justify-between gap-2">
+                  <div className="flex items-center space-x-2">
+                    <CheckCircle2 className="w-4 h-4 shrink-0" strokeWidth={1.75} />
+                    <span>{faucetSuccessMsg}</span>
+                  </div>
+                  {faucetTxHash && (
+                    <a
+                      href={`https://sepolia.basescan.org/tx/${faucetTxHash}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex items-center space-x-1 underline hover:text-white shrink-0 font-mono"
+                    >
+                      <span>Tx</span>
+                      <ExternalLink className="w-3 h-3" strokeWidth={1.6} />
+                    </a>
+                  )}
+                </div>
+              )}
+
+              {faucetError && (
+                <div className="p-3 bg-red-950/60 border border-red-800/70 rounded-xl text-xs text-red-300 flex items-center space-x-2">
+                  <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" strokeWidth={1.6} />
+                  <span>{faucetError}</span>
+                </div>
+              )}
+
+              {/* Live Wallet Balances */}
+              <div className="p-3.5 bg-[#080B10] border border-white/[0.07] rounded-xl space-y-2.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-muted font-medium">Wallet Balances</span>
+                  <span className="font-mono text-ink tabular-nums">
+                    {ethBalance.toFixed(4)} <span className="text-[#80AAFF]">ETH</span>
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  {['bCOIN', 'bNVDA', 'bAAPL', 'bTSLA'].map((sym) => (
+                    <div
+                      key={sym}
+                      className="flex items-center justify-between p-2 rounded-lg bg-[#0E141C] border border-white/[0.06]"
+                    >
+                      <span className="text-muted">{sym}</span>
+                      <span className="font-mono font-semibold text-white tabular-nums">
+                        {(stockBalances[sym] || 0).toFixed(1)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
 
-            {/* Claim Action */}
-            <div className="pt-2 space-y-2">
-              <button
-                disabled={!isConnected || isClaimingFaucet}
-                onClick={handleSingleFaucetClaim}
-                className="w-full py-3 bg-emerald-600 hover:bg-emerald-500 disabled:bg-surface-hover disabled:text-gray-500 text-white rounded-xl font-bold text-xs transition-all shadow-lg shadow-emerald-900/30 flex items-center justify-center space-x-2"
-              >
-                <Droplets className="w-4 h-4" />
-                <span>
-                  {!isConnected
-                    ? 'Connect Wallet to Claim On-Chain'
-                    : claimingProgress
-                    ? claimingProgress
-                    : `Claim +100 ${selectedStock} On-Chain`}
-                </span>
-              </button>
+              {/* Equity Selector */}
+              <div className="space-y-2">
+                <label className="text-[11px] uppercase tracking-micro font-medium text-muted block">
+                  Select Asset to Mint (+100 Shares)
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { sym: 'bCOIN', name: 'Coinbase Global' },
+                    { sym: 'bNVDA', name: 'NVIDIA Corp' },
+                    { sym: 'bAAPL', name: 'Apple Inc.' },
+                    { sym: 'bTSLA', name: 'Tesla, Inc.' },
+                  ].map((item) => {
+                    const active = selectedStock === item.sym;
+                    return (
+                      <motion.button
+                        key={item.sym}
+                        whileTap={{ scale: 0.98 }}
+                        transition={snappySpring}
+                        onClick={() => setSelectedStock(item.sym)}
+                        className={`p-2.5 rounded-xl border text-left transition-colors flex items-center space-x-2.5 ${
+                          active
+                            ? 'border-[#00E599]/60 bg-[#00E599]/10 text-white'
+                            : 'border-white/[0.07] bg-[#080B10]/60 text-muted hover:border-white/[0.14]'
+                        }`}
+                      >
+                        <StockEquityBadge symbol={item.sym} size="sm" />
+                        <div>
+                          <span className="block text-xs font-semibold text-white">{item.sym}</span>
+                          <span className="block text-[10px] text-muted">{item.name}</span>
+                        </div>
+                      </motion.button>
+                    );
+                  })}
+                </div>
+              </div>
 
-              <button
-                disabled={!isConnected || isClaimingFaucet}
-                onClick={handleBatchFaucetClaim}
-                className="w-full py-2 bg-surface hover:bg-surface-hover disabled:text-gray-500 border border-border text-gray-300 rounded-xl font-semibold text-xs transition-colors"
-              >
-                Claim All 4 Testnet Stocks (4 On-Chain Txs)
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+              {/* Actions */}
+              <div className="pt-1 space-y-2">
+                <TactileButton
+                  variant="emerald"
+                  disabled={!isConnected || isClaimingFaucet}
+                  onClick={handleSingleFaucetClaim}
+                  className="w-full py-3 text-xs space-x-2"
+                >
+                  <Droplets className="w-4 h-4" strokeWidth={1.75} />
+                  <span>
+                    {!isConnected
+                      ? 'Connect Wallet to Claim'
+                      : claimingProgress
+                      ? claimingProgress
+                      : `Claim +100 ${selectedStock} On-Chain`}
+                  </span>
+                </TactileButton>
+
+                <TactileButton
+                  variant="secondary"
+                  disabled={!isConnected || isClaimingFaucet}
+                  onClick={handleBatchFaucetClaim}
+                  className="w-full py-2.5 text-xs"
+                >
+                  Claim Starter Basket (4 On-Chain Txs)
+                </TactileButton>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
   );
 }
