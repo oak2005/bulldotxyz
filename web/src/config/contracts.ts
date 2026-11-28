@@ -16,19 +16,19 @@ export interface ProtocolDeployment {
 }
 
 export const CONTRACT_CONFIGS: Record<number, ProtocolDeployment> = {
-  // Base Sepolia (Chain ID 84532) — Live On-Chain Deployment
+  // Base Sepolia (Chain ID 84532) — Live On-Chain V2 Deployment
   84532: {
     chainId: 84532,
     networkName: 'Base Sepolia',
     poolManager: '0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408',
     positionManager: '0x4b2c77d209d3405f41a037ec6c77f7f5b8e2ca80',
     permit2: '0x000000000022D473030F116dDEE9F6B43aC78BA3',
-    factory: '0xF74565Da7C686C3c23057A3A5Fc8782340e769A2',
-    curveDeployer: '0x677e6430D98c48157928a16Ec109f3B06C3cE39E',
-    router: '0xb53EEb0EEf77fe465940C7d28c5963ca37b13F7b',
-    feeVault: '0x9bdaaC49737F20b8f04B2ea8692B737c35A72776',
+    factory: '0xE7bFFa9D74bDA7682958106C3FB7F1877bA8716E',
+    curveDeployer: '0x63Fa79A5FD2bf6fC53f12689ED82992c4c516Ba0',
+    router: '0xBffB230B4a28F961B44A71f5791E8A4aE5c6e8fc',
+    feeVault: '0xA323f48B06d0d49d12b156587Dfd3C8A9E224B78',
     b20Registry: '0x098C0d1E4d7C8713EF1d92B2D3c67Cc923634C87',
-    deploymentBlock: BigInt(63197400),
+    deploymentBlock: BigInt(64836324),
     explorerUrl: 'https://sepolia.basescan.org',
   },
   // Base Mainnet (Chain ID 8453) — Paused pending official Coinbase B20 rollout

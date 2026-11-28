@@ -6,6 +6,7 @@ import { Providers } from '../providers';
 import { Header } from '../components/Header';
 import { MobileBottomNav } from '../components/MobileBottomNav';
 import { BulldotLogo } from '../components/BrandAssets';
+import { CONTRACT_CONFIGS } from '../config/contracts';
 
 export const viewport: Viewport = {
   width: 'device-width',
@@ -84,12 +85,12 @@ export default function RootLayout({
                     Documentation
                   </Link>
                   <a
-                    href="https://sepolia.basescan.org/address/0xF74565Da7C686C3c23057A3A5Fc8782340e769A2"
+                    href={`${CONTRACT_CONFIGS[84532].explorerUrl}/address/${CONTRACT_CONFIGS[84532].factory}`}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="font-mono text-muted hover:text-ink transition-colors"
                   >
-                    Factory 0xF745...69A2
+                    Factory {CONTRACT_CONFIGS[84532].factory.slice(0, 6)}...{CONTRACT_CONFIGS[84532].factory.slice(-4)}
                   </a>
                 </div>
               </div>
