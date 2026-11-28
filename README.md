@@ -1,111 +1,168 @@
-# bulldotxyz (`bulldot.xyz`) 🐂
+# bulldotxyz
 
-> **Autonomous Decentralized Exchange & Fair Launchpad on Base paired exclusively with Coinbase Tokenized Stocks (B20 Standard).**
-
-bulldotxyz is an immutable, low-touch DeFi protocol built on Base. It bridges traditional equities with permissionless on-chain liquidity by enabling community tokens to pair directly with verified Coinbase tokenized stocks (`bCOIN`, `bNVDA`, `bAAPL`, `bTSLA`). Designed for high resilience, mathematical solvency, and minimal administrative oversight.
+**Stock-backed decentralized exchange and token launchpad on Base, paired with Coinbase Tokenized Stocks (B20 standard).**
 
 ---
 
-## 🏛️ System Architecture
+## Status
 
-```
-                                  ┌──────────────────────────────┐
-                                  │   bulldotxyz Web Platform    │
-                                  │   (Next.js 14 + Viem + Wagmi)│
-                                  └──────────────┬───────────────┘
+> **Contracts:** Deployed and verified with end-to-end unit and Base Sepolia fork tests (`38 / 38` passing).
+> **Web App (Temporary):** [https://web-oak14.vercel.app](https://web-oak14.vercel.app)
+> **Primary Domain:** `bulldot.xyz` (acquired — domain cutover from the temporary Vercel URL is in progress).
+> **Network Scope:** Live on **Base Sepolia Testnet (`84532`)**; **Base Mainnet (`8453`)** configuration is ready and paused pending official Coinbase B20 asset deployment.
+
+---
+
+## Why bulldotxyz
+
+Most on-chain token launchpads pair new markets solely against native ETH or idle stablecoins. Base needed a launchpad primitive built directly around productive on-chain equity assets:
+
+- **Equity-Backed Liquidity Depth:** Every market launched on `BulldotFactory` must pair exclusively with an allowlisted Coinbase B20 tokenized stock (`bCOIN`, `bNVDA`, `bAAPL`, `bTSLA`), anchoring pool reserves in recognizable real-world equities rather than purely circular token emissions.
+- **Native ETH Onboarding Without Friction:** Traders do not need to acquire B20 stocks beforehand. `BulldotRouter` settles single-transaction two-hop swaps (`ETH <-> B20 Stock <-> Token`) through Uniswap v4 `PoolManager`.
+- **Corporate-Action Resilience:** Tokenized equities undergo stock splits that change token-to-share ratios over time. Bonding curves and fee vaults account in canonical shares via `tokensToShares()`, ensuring splits never break graduation targets, pricing continuity, or sell solvency.
+- **Minimal, Verifiable Governance:** Permanent Uniswap v4 liquidity locking, optional renounceable token fee management, and renounceable factory ownership keep deployed markets self-sustaining with low maintenance overhead.
+
+---
+
+## Core Features
+
+- **Dual Launch Modes:**
+  - **Fair Launch Bonding Curve:** Zero upfront capital required. Starts with `30` virtual B20 reserve, allocates `800M` tokens to the curve (`200M` reserved for LP out of a fixed `1B` supply), and automatically migrates to Uniswap v4 once `50` canonical shares accumulate.
+  - **Instant Uniswap v4 Pool:** Deploys a fixed-supply `1B` ERC-20 token paired with an initial B20 equity deposit, initializes a `0.30%` pool in Uniswap v4 `PoolManager`, and locks `100%` of full-range LP liquidity permanently.
+- **Atomic 2-Hop ETH Routing:** Buy or sell any curve or graduated/instant Uniswap v4 pool in a single transaction with Native ETH (`swapEthForTokens` / `swapTokensForEth`) or swap directly with B20 stocks (`swapB20ForTokens` / `swapTokensForB20`).
+- **Multiplier-Aware B20 Accounting:** Normalizes deposits using each B20 stock's `tokensToShares()` multiplier oracle (`canonicalShares = (netB20 * 1e18) / multiplier`) and caps sell payouts by available contract reserves (`min(grossB20, stock.balanceOf(curve))`).
+- **Autonomous Fee Vault & Treasury Burn Redirect:** Creator fees (up to `2.5%` / `250 bps`) accrue inside `BulldotFeeVault` with zero admin custody. Token managers can redirect `100%` of fees to `0x000000000000000000000000000000000000dEaD` (making fee settlement permissionless) and permanently lock fee routing via `renounceTokenManager()`.
+- **Temporary Anti-Sniper Controls:** Optional `maxWalletBps` limit (e.g., `2%` = `16M` tokens) during bonding-curve trading that automatically deactivates upon Uniswap v4 graduation.
+- **Renounceable Protocol Ownership:** `BulldotFactory` and `BulldotRouter` support permanent `renounceOwnership()`, leaving core launch and swap execution fully immutable.
+
+---
+
+## Architecture Overview
+
+```text
+                        ┌────────────────────────────────────┐
+                        │       bulldotxyz Web Client        │
+                        │  Next.js 14 • Wagmi • Viem • RK    │
+                        └──────────────────┬─────────────────┘
+                                           │
+                                           ▼
+                        ┌────────────────────────────────────┐
+                        │          BulldotRouter.sol         │
+                        │ - Single-tx ETH <-> Stock <-> Meme │
+                        │ - Curve / v4 pool auto-resolution  │
+                        │ - Non-custodial refund guarantee   │
+                        └─────────┬─────────────────┬────────┘
+                                  │                 │
+           ┌──────────────────────┘                 └──────────────────────┐
+           ▼                                                               ▼
+┌──────────────────────────────────┐                            ┌──────────────────────────────────┐
+│     BulldotBondingCurve.sol      │                            │       BulldotFactory.sol         │
+│ - Virtual AMM (vB20 * vTok = k)  │◄─── deploys via ───────────│ - Verified B20 allowlist check   │
+│ - 50 canonical shares graduation │     CurveDeployer          │ - Fair Curve & Instant v4 modes  │
+│ - Expiring maxWalletBps cap      │                            │ - Records tokenToCurve & Stock   │
+└─────────────────┬────────────────┘                            └────────────────┬─────────────────┘
+                  │ (At 50 Shares)                                               │ (Instant Launch)
+                  ▼                                                              ▼
+       ┌───────────────────────────────────────────────────────────────────────────────────┐
+       │                        Uniswap v4 PoolManager (Singleton)                         │
+       │ - Full-range LP locked directly via unlockCallback (no withdrawal code path)      │
+       │ - Remainder rounding dust (<0.1%) forwarded to 0x...dEaD                          │
+       └─────────────────────────────────────────┬─────────────────────────────────────────┘
                                                  │
                                                  ▼
-                                  ┌──────────────────────────────┐
-                                  │      BulldotRouter.sol       │
-                                  │  - Seamless dual-mode routing│
-                                  │  - Token/Curve auto-resolver │
-                                  │  - Non-custodial refund safe │
-                                  └───────┬──────────────┬───────┘
-                                          │              │
-                   ┌──────────────────────┘              └──────────────────────┐
-                   ▼                                                            ▼
-    ┌──────────────────────────────┐                             ┌──────────────────────────────┐
-    │   BulldotBondingCurve.sol    │                             │       BulldotFactory.sol     │
-    │ - Virtual AMM ($vB20 \cdot vTokens = k$)                   │ - Deploys tokens & curves    │
-    │ - 50 Canonical Share Target  │                             │ - Verified B20 stock check   │
-    │ - Anti-Sniper Max Wallet Cap │                             │ - Instant v4 Pool deployment │
-    │ - Solvency-bounded payouts   │                             │ - Renounceable ownership     │
-    └──────────────┬───────────────┘                             └──────────────┬───────────────┘
-                   │ (Upon 50 Shares)                                           │
-                   ▼                                                            │
-    ┌──────────────────────────────┐                                            │
-    │    Uniswap v4 Graduation     │                                            │
-    │ - Initializes PoolManager    │                                            │
-    │ - Mints 100% LP to 0x...dEaD ◄────────────────────────────────────────────┘
-    └──────────────────────────────┘
-                   │
-                   ▼
-    ┌──────────────────────────────┐
-    │     BulldotFeeVault.sol      │
-    │ - Multiplier-aware tracking  │
-    │ - Optional Treasury Redirect │
-    │ - Permissionless burn execution
-    └──────────────────────────────┘
+                               ┌──────────────────────────────────┐
+                               │       BulldotFeeVault.sol        │
+                               │ - Non-custodial fee accrual      │
+                               │ - Multiplier-aware share metrics │
+                               │ - Permissionless 0x...dEaD burns │
+                               └──────────────────────────────────┘
 ```
 
 ---
 
-## 🌟 Core Protocol Mechanics
+## Security Invariants
 
-### 1. Dual Launch Modes
-* **Instant Uniswap v4 Pool (Mode 1)**: For creators with initial capital. Deploys a fixed-supply token (1,000,000,000 supply) paired with a verified B20 stock token and irreversibly mints 100% of the position to `address(0x000000000000000000000000000000000000dEaD)`.
-* **Fair Launch Bonding Curve (Mode 2)**: Zero upfront capital required. Tokens trade along an autonomous virtual AMM curve seeded with 30 virtual B20 tokens. Once 50 canonical equity shares are accumulated, the contract automatically migrates all liquidity into a permanent Uniswap v4 pool and locks LP positions to `0x...dEaD`.
-
-### 2. Multiplier-Aware Equity Accounting (B20 Standard)
-Coinbase tokenized stocks implement dynamic on-chain share multipliers where $1\text{ Token} \neq 1\text{ Share}$ over time due to corporate splits:
-$$\text{Canonical Shares} = \text{tokensToShares}(\text{netB20}) = \frac{\text{netB20} \times 10^{18}}{\text{multiplier}}$$
-
-* **Split Invariance**: Graduation thresholds and fee accounting track canonical shares rather than raw ERC-20 balances, ensuring that forward or reverse stock splits do not distort curve progress or graduation pricing.
-* **Mathematical Solvency**: Payouts during user sells are strictly bounded by raw vault reserves:
-  $$\text{Payout} = \min(\text{grossB20}, \text{availableB20})$$
-  This eliminates reserve underflow risks across any corporate split scenario.
-
-### 3. Autonomous Fee Vault & Stock Buybacks
-* **Autonomous Collection**: Creator fees (capped at 2.5% max) accrue in `BulldotFeeVault` in both raw token units and normalized canonical shares.
-* **Stock Treasury Redirection**: Creators can redirect 100% of fees to `0x000000000000000000000000000000000000dEaD` (Coinbase Stock Treasury), effectively converting protocol volume into equity buybacks.
-* **Permissionless Burn Execution**: When fees are redirected to `0x...dEaD`, `feeVault.claimFees()` is completely permissionless. Any community member, bot, or keeper can trigger the burn transaction.
-* **Manager Renunciation**: Creators can call `renounceTokenManager()` to permanently lock fee redirection to the stock treasury, preventing fee hijacking.
-
-### 4. Anti-Sniper Fair Launch Controls
-Creators can optionally configure a `maxWalletBps` limit (e.g., 2% = 16M tokens) active strictly during the bonding curve phase. The check deactivates automatically upon graduation to Uniswap v4.
-
----
-
-## 🔒 Security Architecture & Invariants
-
-| Invariant | Mathematical / Code Guarantee | Target Contract |
+| Invariant | Guarantee | Contract |
 | :--- | :--- | :--- |
-| **Non-Custodial Router Guarantee** | Router never holds balances. If a trade delivers less than `minAmountOut`, allowances are cleared, 100% of input capital is refunded to `msg.sender`, and the transaction reverts. | `BulldotRouter.sol` |
-| **Permanent Liquidity Locking** | 100% of initial and migrated Uniswap v4 LP positions are minted directly to `0x...dEaD`. No withdrawal, decrease, or harvest functions exist. | `BulldotFactory.sol`, `BulldotBondingCurve.sol` |
-| **Share Graduation Normalization** | Threshold checks evaluate underlying canonical equity shares, guaranteeing parity across forward/reverse stock splits. | `BulldotBondingCurve.sol` |
-| **Graduation Excess Refund** | Any capital exceeding the 50-share graduation threshold is refunded upfront to `msg.sender` before assessing fees. | `BulldotBondingCurve.sol` |
-| **Signature Replay Protection** | EIP-2612 `permit` verifies nonces, enforces canonical `s` values ($s \le \text{secp256k1n}/2$), and recomputes domain separators on chain ID changes. | `BulldotToken.sol` |
-| **Zero-Admin Autonomy** | Factory ownership is renounceable via `renounceOwnership()`. The protocol has zero pauses, fee overrides, or custody backdoors. | `BulldotFactory.sol` |
+| **Non-Custodial Router** | Router retains zero ETH or token balances across swaps; unused ETH settle change and graduation excess refund to `msg.sender` in the same call. | `BulldotRouter.sol` |
+| **Permanent Liquidity Lock** | `100%` of full-range Uniswap v4 LP added by instant launches and curve graduations is held in non-withdrawable callback contracts (`unlockCallback` permits positive delta only; zero decrease/take functions exist). Rounding dust (`<0.1%`) goes to `0x...dEaD`. | `BulldotFactory.sol`, `BulldotBondingCurve.sol` |
+| **Split-Invariant Thresholds** | Curve graduation (`50` shares) and Fee Vault share metrics normalize raw token amounts via the B20 `tokensToShares()` oracle, while sell payouts remain bounded by raw B20 balance. | `BulldotBondingCurve.sol`, `BulldotFeeVault.sol` |
+| **Hard-Capped Fees** | Creator fee is capped at `2.50%` (`250 bps`); protocol treasury fee is hard-capped at `0.10%` (`10 bps` on Base Sepolia, `0 bps` on Base Mainnet). | `BulldotFactory.sol`, `BulldotBondingCurve.sol` |
+| **Zero-Custody Fee Vault** | Protocol owners cannot seize, pause, or redirect creator rewards stored in `BulldotFeeVault`. | `BulldotFeeVault.sol` |
+| **EIP-2612 Hardening & Reentrancy** | Token permits enforce canonical low-`s` signatures (`s <= secp256k1n/2`) and dynamic chain ID domain separators; state transitions use `nonReentrant` CEI guards. | `BulldotToken.sol`, All Core Contracts |
 
 ---
 
-## ⚙️ Network Configuration
-
-All addresses and parameters are managed strictly via environment configuration:
+## Network Configuration
 
 | Parameter | Base Sepolia (Testnet) | Base Mainnet |
 | :--- | :--- | :--- |
 | **Chain ID** | `84532` | `8453` |
-| **RPC Endpoint** | `https://sepolia.base.org` | `https://mainnet.base.org` |
-| **Block Explorer** | [sepolia.basescan.org](https://sepolia.basescan.org) | [basescan.org](https://basescan.org) |
-| **Uniswap v4 PoolManager** | `0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408` | `0x498581fF718922c3f8e6Ac1447f5c0994264F0F9` |
-| **Uniswap v4 PositionManager** | `0x4b2c77d209d3405f41a037ec6c77f7f5b8e2ca80` | `0x7C40c31F41609b77Ecdc5222E42b8e3a2B79A63f` |
+| **Primary RPC** | `https://base-sepolia-rpc.publicnode.com` (`https://sepolia.base.org`) | `https://base-rpc.publicnode.com` (`https://mainnet.base.org`) |
+| **Explorer** | [sepolia.basescan.org](https://sepolia.basescan.org) | [basescan.org](https://basescan.org) |
+| **Status** | **Live (V2 Contracts Deployed)** | **Paused** (Pending Official B20 Assets) |
+| **Protocol Treasury Fee** | `0.10%` (`10 bps` max) -> `0xc96147c68ca8e153e70B3bC4745b8d974bDd212A` | `0.00%` (`0 bps`) |
+| **Uniswap v4 `PoolManager`** | `0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408` | `0x498581fF718922c3f8e6Ac1447f5c0994264F0F9` |
+| **Uniswap v4 `PositionManager`** | `0x4b2c77d209d3405f41a037ec6c77f7f5b8e2ca80` | `0x7C40c31F41609b77Ecdc5222E42b8e3a2B79A63f` |
 | **Permit2** | `0x000000000022D473030F116dDEE9F6B43aC78BA3` | `0x000000000022D473030F116dDEE9F6B43aC78BA3` |
-| **Treasury Fee Recipient** | `0xc96147c68ca8e153e70B3bC4745b8d974bDd212A` | `address(0)` (Inactive) |
-| **Treasury Fee Rate** | `0.10%` (10 bps, immutable $\le 0.1\%$ cap) | `0.00%` |
-| **Config File** | `contracts/config/84532.json` | `contracts/config/8453.json` |
+| **BulldotFactory (V2)** | `0xE7bFFa9D74bDA7682958106C3FB7F1877bA8716E` | Pending Mainnet Rollout |
+| **BulldotRouter (V2)** | `0xBffB230B4a28F961B44A71f5791E8A4aE5c6e8fc` | Pending Mainnet Rollout |
+| **BulldotFeeVault (V2)** | `0xA323f48B06d0d49d12b156587Dfd3C8A9E224B78` | Pending Mainnet Rollout |
+| **BulldotCurveDeployer (V2)** | `0x63Fa79A5FD2bf6fC53f12689ED82992c4c516Ba0` | Pending Mainnet Rollout |
+| **B20 Registry (Mock Oracle)** | `0x098C0d1E4d7C8713EF1d92B2D3c67Cc923634C87` | Pending Mainnet Rollout |
+| **Config File** | [contracts/config/84532.json](contracts/config/84532.json) | [contracts/config/8453.json](contracts/config/8453.json) |
+
+### Base Sepolia Testnet B20 Tokens
+- `bCOIN`: `0xB91fcC29d586E2F8326d4E956160f3FDf289d1c5`
+- `bNVDA`: `0x1ad0e455458a67B91aae2d4C6cc9EF1CCc493EA5`
+- `bAAPL`: `0xC31f5a66b19EbD0039fd0e3Ad31E6D0c57b017D2`
+- `bTSLA`: `0xa855bBe14a6b67487717cCB0E0cFa3A0fbEe9007`
 
 ---
 
-## 📄 License
+## Getting Started
+
+### Prerequisites
+- [Foundry](https://getfoundry.sh/) (`forge`, `cast`)
+- Node.js `v20+` and `npm`
+
+### 1. Smart Contracts (`contracts/`)
+```bash
+cd contracts
+forge build --sizes
+BASE_SEPOLIA_RPC_URL="https://base-sepolia-rpc.publicnode.com" forge test -vv
+```
+PowerShell equivalent:
+```powershell
+cd contracts
+$env:BASE_SEPOLIA_RPC_URL="https://base-sepolia-rpc.publicnode.com"
+forge build --sizes
+forge test -vv
+```
+Suite coverage (`38 / 38` tests across 5 suites): `BulldotFactory.t.sol`, `BulldotBondingCurve.t.sol`, `BulldotRouter.t.sol`, `BulldotFeeSystem.t.sol`, and live Uniswap v4 fork tests in `BaseSepoliaFork.t.sol`.
+
+### 2. Web Application (`web/`)
+```bash
+cd web
+npm install
+npm run dev
+```
+Production verification:
+```bash
+cd web
+npm run build
+```
+
+---
+
+## Deployment Notes
+
+- **Base Sepolia V2 Deployment:** Core contracts (`Factory`, `CurveDeployer`, `FeeVault`, `Router`) are live at block `64836324` (`UpgradeProtocolV2.s.sol`). `ETH / B20` Uniswap v4 routing pools are initialized on the `0.05%` tier (`fee = 500`, `tickSpacing = 10`) while launched `Token / B20` pools use the standard `0.30%` tier (`fee = 3000`, `tickSpacing = 60`).
+- **Frontend Hosting:** Hosted on Vercel with root directory `web/` (`https://web-oak14.vercel.app`), optionally configured with `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` for production WalletConnect relay quotas. DNS cutover to **`bulldot.xyz`** is in progress.
+- **Mainnet Transition:** `contracts/config/8453.json` holds canonical Base Mainnet Uniswap v4 `PoolManager` / `Permit2` coordinates with protocol fees disabled (`0 bps`). Once official Coinbase B20 stock addresses and `b20Registry` are configured, deploy with `contracts/script/Deploy.s.sol` and update `web/src/config/contracts.ts` and `web/src/config/stocks.ts`.
+
+---
+
+## License
+
 MIT License. Open source and free for the Ethereum and Base community.

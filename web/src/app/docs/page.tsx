@@ -4,16 +4,18 @@ import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import {
   BookOpen,
+  Rocket,
   ArrowRightLeft,
   ShieldCheck,
-  Building2,
   FileCode2,
   ExternalLink,
   Copy,
   Check,
   ArrowRight,
   Lock,
-  Layers,
+  Flame,
+  Building2,
+  Globe,
 } from 'lucide-react';
 import { SpotlightCard, TactileLink, Reveal, snappySpring } from '../../components/MotionPrimitives';
 import { BaseNetworkMark, UniswapMark, StockEquityBadge } from '../../components/BrandAssets';
@@ -21,14 +23,14 @@ import { CONTRACT_CONFIGS } from '../../config/contracts';
 import { VERIFIED_B20_STOCKS } from '../../config/stocks';
 import { TESTNET_TREASURY_ADDRESS } from '../../context/ProtocolContext';
 
-type DocSection = 'overview' | 'routing' | 'math' | 'treasury' | 'contracts';
+type DocSection = 'overview' | 'launching' | 'swapping' | 'safety' | 'contracts';
 
 export default function DocsPage() {
   const [activeSection, setActiveSection] = useState<DocSection>('overview');
   const [copiedAddr, setCopiedAddr] = useState<string | null>(null);
 
   const sepolia = CONTRACT_CONFIGS[84532];
-  const explorer = 'https://sepolia.basescan.org';
+  const explorer = sepolia.explorerUrl;
 
   const copyAddress = async (addr: string) => {
     try {
@@ -39,42 +41,46 @@ export default function DocsPage() {
   };
 
   const sections: { id: DocSection; label: string; icon: React.ElementType }[] = [
-    { id: 'overview', label: 'Architecture & Thesis', icon: BookOpen },
-    { id: 'routing', label: '2-Hop ETH Routing', icon: ArrowRightLeft },
-    { id: 'math', label: 'B20 Bonding Curve', icon: Layers },
-    { id: 'treasury', label: 'Fees & Security', icon: ShieldCheck },
+    { id: 'overview', label: 'How It Works', icon: BookOpen },
+    { id: 'launching', label: 'Launch Modes', icon: Rocket },
+    { id: 'swapping', label: 'ETH & Stock Swaps', icon: ArrowRightLeft },
+    { id: 'safety', label: 'Fees & Safety', icon: ShieldCheck },
     { id: 'contracts', label: 'Live Contracts', icon: FileCode2 },
   ];
 
   const deployedRows = [
-    { label: 'BulldotFactory', role: 'Token & Curve Deployment Gateway', address: sepolia.factory },
-    { label: 'BulldotRouter', role: '2-Hop ETH <-> Stock <-> Meme Router', address: sepolia.router },
-    { label: 'BulldotFeeVault', role: 'Non-Custodial Multiplier-Aware Fee Vault', address: sepolia.feeVault },
-    { label: 'BulldotCurveDeployer', role: 'Stateless Bonding Curve Deployer', address: sepolia.curveDeployer },
-    { label: 'MockB20Registry', role: 'Allowlisted Equity Verification Oracle', address: sepolia.b20Registry },
+    { label: 'BulldotFactory (V2)', role: 'Token & Curve Launch Gateway', address: sepolia.factory },
+    { label: 'BulldotRouter (V2)', role: 'Atomic ETH <-> Stock <-> Token Router', address: sepolia.router },
+    { label: 'BulldotFeeVault (V2)', role: 'Non-Custodial Creator Reward Vault', address: sepolia.feeVault },
+    { label: 'BulldotCurveDeployer (V2)', role: 'Bonding Curve Deployment Helper', address: sepolia.curveDeployer },
+    { label: 'B20 Registry (Mock)', role: 'Verified B20 Equity Allowlist Oracle', address: sepolia.b20Registry },
     { label: 'Uniswap v4 PoolManager', role: 'Canonical Base Sepolia v4 Singleton', address: sepolia.poolManager },
-    { label: 'Testnet Treasury (<=0.1%)', role: 'Sepolia Protocol Fee Recipient', address: TESTNET_TREASURY_ADDRESS },
+    { label: 'Testnet Treasury (<=0.1%)', role: 'Base Sepolia Protocol Fee Recipient', address: TESTNET_TREASURY_ADDRESS },
   ];
 
   return (
     <div className="max-w-6xl mx-auto space-y-8">
-      {/* Header */}
+      {/* Header & Live Status */}
       <Reveal className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-white/[0.08] pb-6">
-        <div className="space-y-2 max-w-2xl">
-          <div className="flex items-center space-x-2">
+        <div className="space-y-2.5 max-w-2xl">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="px-2.5 py-0.5 rounded-md text-[10px] font-mono uppercase tracking-micro bg-[#0052FF]/15 text-[#7CA8FF] border border-[#0052FF]/35">
-              Protocol Specification
+              Guide &amp; Reference
             </span>
             <span className="inline-flex items-center space-x-1.5 text-[11px] font-mono text-[#00E599]">
               <BaseNetworkMark size={13} />
-              <span>Base Sepolia Active (84532)</span>
+              <span>Base Sepolia Live (84532)</span>
+            </span>
+            <span className="inline-flex items-center space-x-1 text-[11px] font-mono text-muted">
+              <Globe className="w-3 h-3 text-[#7CA8FF]" strokeWidth={1.6} />
+              <span>bulldot.xyz domain rollout in progress</span>
             </span>
           </div>
           <h1 className="font-display text-3xl sm:text-4xl font-semibold text-white tracking-display">
-            How bulldot.xyz Works
+            Understanding bulldotxyz
           </h1>
           <p className="text-sm text-muted leading-relaxed">
-            Technical reference covering our equity-backed bonding curve AMM, atomic Uniswap v4 ETH routing, split-invariant B20 accounting, and verified smart contracts on Base.
+            A straightforward guide to equity-backed token launches on Base, single-click ETH swaps through Uniswap v4, creator fee controls, and our verified contracts.
           </p>
         </div>
 
@@ -91,7 +97,6 @@ export default function DocsPage() {
 
       {/* Main Split Navigation + Content */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        {/* Sidebar / Mobile Scroll Tabs */}
         <aside className="lg:col-span-3 flex lg:flex-col gap-1.5 overflow-x-auto pb-2 lg:pb-0 lg:sticky lg:top-24">
           {sections.map((sec) => {
             const Icon = sec.icon;
@@ -123,39 +128,38 @@ export default function DocsPage() {
           })}
         </aside>
 
-        {/* Documentation Body */}
         <div className="lg:col-span-9 space-y-6">
           {activeSection === 'overview' && (
             <Reveal className="space-y-6">
               <SpotlightCard className="p-6 sm:p-8 space-y-5">
                 <span className="font-mono text-[10px] uppercase tracking-micro text-[#00E599]">
-                  01 / Protocol Thesis
+                  01 / Overview
                 </span>
                 <h2 className="font-display text-2xl font-semibold text-white tracking-tight">
-                  Why Pair Community Tokens With Tokenized Stocks?
+                  Tokenized Equities as Base Liquidity Backing
                 </h2>
                 <p className="text-sm text-muted leading-relaxed">
-                  Conventional launchpads pair meme tokens solely against volatile native ETH or idle stablecoins. When market risk-off cycles hit, liquidity drains out in a single direction. <strong className="text-ink">bulldot.xyz</strong> replaces pure speculative backing by enforcing that every deployed token on <strong className="text-ink">BulldotFactory</strong> pairs exclusively with verified <strong className="text-ink">Coinbase B20 tokenized equities</strong> (<span className="font-mono text-ink">bCOIN</span>, <span className="font-mono text-ink">bNVDA</span>, <span className="font-mono text-ink">bAAPL</span>, <span className="font-mono text-ink">bTSLA</span>).
+                  Instead of pairing every new community market strictly with volatile gas tokens, <strong className="text-ink">bulldotxyz</strong> pairs every launched token with a verified <strong className="text-ink">Coinbase B20 tokenized stock</strong>. That keeps pool reserves anchored in real-world equity value while preserving open, permissionless trading on Base and Uniswap v4.
                 </p>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
                   <div className="p-4 rounded-xl bg-[#080B10] border border-white/[0.07] space-y-2">
                     <div className="flex items-center space-x-2 text-ink font-semibold text-xs">
                       <Lock className="w-4 h-4 text-[#00E599]" strokeWidth={1.6} />
-                      <span>Permanent Uniswap v4 Lock</span>
+                      <span>Locked Liquidity From Block Zero</span>
                     </div>
                     <p className="text-xs text-muted leading-relaxed">
-                      Every instant launch and every bonding curve that completes its 50-share target mints 100% of Uniswap v4 LP liquidity straight to <span className="font-mono text-ink">0x...dEaD</span> with zero withdrawal hooks.
+                      Whether launched via an Instant pool or graduated from a bonding curve, 100% of Uniswap v4 LP liquidity locks permanently inside PoolManager with no withdrawal path.
                     </p>
                   </div>
 
                   <div className="p-4 rounded-xl bg-[#080B10] border border-white/[0.07] space-y-2">
                     <div className="flex items-center space-x-2 text-ink font-semibold text-xs">
                       <Building2 className="w-4 h-4 text-[#7CA8FF]" strokeWidth={1.6} />
-                      <span>Equity Buyback Alignment</span>
+                      <span>Aligned With Public Equities</span>
                     </div>
                     <p className="text-xs text-muted leading-relaxed">
-                      Creators can route swap fees directly to <span className="font-mono text-ink">0x...dEaD</span> (Stock Treasury Burn) and lock management forever via <span className="font-mono text-ink">renounceTokenManager()</span>.
+                      Every buy adds equity demand into the paired stock reserve, and creators can redirect swap fees straight into permanent equity burns on-chain.
                     </p>
                   </div>
                 </div>
@@ -164,10 +168,10 @@ export default function DocsPage() {
               <SpotlightCard accent="emerald" className="p-6 space-y-4">
                 <div className="flex items-center justify-between flex-wrap gap-2">
                   <h3 className="font-display text-base font-semibold text-white">
-                    Verified Base Sepolia Paired Equities
+                    Supported Testnet B20 Equities
                   </h3>
                   <span className="text-[11px] font-mono text-[#00E599]">
-                    B20 Standard • Split-Aware
+                    Claim Free via Header Faucet
                   </span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -201,54 +205,102 @@ export default function DocsPage() {
             </Reveal>
           )}
 
-          {activeSection === 'routing' && (
+          {activeSection === 'launching' && (
             <Reveal>
               <SpotlightCard className="p-6 sm:p-8 space-y-6">
                 <span className="font-mono text-[10px] uppercase tracking-micro text-[#7CA8FF]">
-                  02 / Atomic Settlement Pipeline
+                  02 / Dual Launch Modes
                 </span>
                 <h2 className="font-display text-2xl font-semibold text-white tracking-tight">
-                  Single-Transaction ETH &harr; Stock &harr; Token Swaps
+                  Two Ways to Deploy on Base
                 </h2>
                 <p className="text-sm text-muted leading-relaxed">
-                  Users do not need to acquire tokenized stocks manually before trading. <span className="font-mono text-ink">BulldotRouter.sol</span> integrates directly with Uniswap v4 <span className="font-mono text-ink">PoolManager</span> flash accounting (<span className="font-mono text-ink">unlockCallback</span>) to bridge Native ETH and B20 equities atomically in one transaction.
+                  Every launched token has a fixed 1,000,000,000 supply with zero mint authority after deployment. Choose the launch path that fits your community:
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="p-5 rounded-xl bg-[#080B10] border border-[#0052FF]/35 space-y-3">
+                    <div className="flex items-center space-x-2 text-[#7CA8FF] font-display font-semibold text-base">
+                      <Rocket className="w-4 h-4" strokeWidth={1.75} />
+                      <span>Fair Launch Bonding Curve</span>
+                    </div>
+                    <p className="text-xs text-muted leading-relaxed">
+                      Launch with zero upfront capital. Community buyers fund liquidity along an automatic curve until 50 underlying shares accumulate, then the pool graduates seamlessly into permanent Uniswap v4 liquidity.
+                    </p>
+                    <ul className="space-y-1.5 text-[11px] text-ink/85 font-mono pt-1">
+                      <li>• 0 upfront B20 required</li>
+                      <li>• Optional anti-sniper wallet cap (1% or 2%)</li>
+                      <li>• Cap lifts automatically after graduation</li>
+                    </ul>
+                  </div>
+
+                  <div className="p-5 rounded-xl bg-[#080B10] border border-[#00E599]/35 space-y-3">
+                    <div className="flex items-center space-x-2 text-[#00E599] font-display font-semibold text-base">
+                      <Flame className="w-4 h-4" strokeWidth={1.75} />
+                      <span>Instant Uniswap v4 Pool</span>
+                    </div>
+                    <p className="text-xs text-muted leading-relaxed">
+                      Seed initial B20 stock liquidity immediately upon creation. The entire 1B token supply and your stock deposit enter a 0.30% Uniswap v4 pool straight away and lock permanently.
+                    </p>
+                    <ul className="space-y-1.5 text-[11px] text-ink/85 font-mono pt-1">
+                      <li>• Immediate Uniswap v4 price discovery</li>
+                      <li>• 100% full-range LP permanently locked</li>
+                      <li>• No max-wallet cap restriction</li>
+                    </ul>
+                  </div>
+                </div>
+              </SpotlightCard>
+            </Reveal>
+          )}
+
+          {activeSection === 'swapping' && (
+            <Reveal>
+              <SpotlightCard className="p-6 sm:p-8 space-y-6">
+                <span className="font-mono text-[10px] uppercase tracking-micro text-[#00E599]">
+                  03 / Swapping &amp; Routing
+                </span>
+                <h2 className="font-display text-2xl font-semibold text-white tracking-tight">
+                  Trade With Native ETH or Direct B20 Stocks
+                </h2>
+                <p className="text-sm text-muted leading-relaxed">
+                  You can connect any EVM wallet configured for Base Sepolia and swap using Native ETH—no manual stock swapping needed first. Or toggle <strong className="text-ink">Direct Stock</strong> if you already hold B20 shares from the faucet.
                 </p>
 
                 <div className="space-y-3">
                   <div className="p-4 rounded-xl bg-[#080B10] border border-[#0052FF]/35 space-y-2">
                     <div className="flex items-center justify-between text-xs font-semibold text-white">
-                      <span>Buying With Native ETH (Zero ETH Approval)</span>
-                      <span className="font-mono text-[#00E599] text-[11px]">swapEthForTokens()</span>
+                      <span>One-Transaction ETH Buy</span>
+                      <span className="font-mono text-[#00E599] text-[11px]">Default Route</span>
                     </div>
                     <div className="font-mono text-xs text-muted flex flex-wrap items-center gap-2 pt-1">
                       <span className="px-2 py-1 rounded bg-[#141C27] text-white">Native ETH</span>
                       <span className="text-[#00E599]">&rarr;</span>
                       <span className="px-2 py-1 rounded bg-[#141C27] text-[#7CA8FF] inline-flex items-center gap-1">
-                        <UniswapMark size={12} /> PoolManager (ETH/Stock)
+                        <UniswapMark size={12} /> B20 Stock Pool
                       </span>
                       <span className="text-[#00E599]">&rarr;</span>
                       <span className="px-2 py-1 rounded bg-[#141C27] text-[#00E599]">
-                        BondingCurve / v4 Pool
+                        Token Pool
                       </span>
                       <span className="text-[#00E599]">&rarr;</span>
-                      <span className="px-2 py-1 rounded bg-[#141C27] text-white">User Wallet</span>
+                      <span className="px-2 py-1 rounded bg-[#141C27] text-white">Your Wallet</span>
                     </div>
                   </div>
 
                   <div className="p-4 rounded-xl bg-[#080B10] border border-[#00E599]/30 space-y-2">
                     <div className="flex items-center justify-between text-xs font-semibold text-white">
-                      <span>Selling Tokens Back to Native ETH</span>
-                      <span className="font-mono text-[#7CA8FF] text-[11px]">swapTokensForEth()</span>
+                      <span>One-Transaction Sell Back to ETH</span>
+                      <span className="font-mono text-[#7CA8FF] text-[11px]">Reverse Route</span>
                     </div>
                     <div className="font-mono text-xs text-muted flex flex-wrap items-center gap-2 pt-1">
                       <span className="px-2 py-1 rounded bg-[#141C27] text-white">Community Token</span>
                       <span className="text-[#7CA8FF]">&rarr;</span>
                       <span className="px-2 py-1 rounded bg-[#141C27] text-[#00E599]">
-                        BondingCurve.sell()
+                        Paired Stock
                       </span>
                       <span className="text-[#7CA8FF]">&rarr;</span>
                       <span className="px-2 py-1 rounded bg-[#141C27] text-[#7CA8FF] inline-flex items-center gap-1">
-                        <UniswapMark size={12} /> PoolManager.take(ETH)
+                        <UniswapMark size={12} /> ETH Payout
                       </span>
                       <span className="text-[#7CA8FF]">&rarr;</span>
                       <span className="px-2 py-1 rounded bg-[#141C27] text-white">Native ETH</span>
@@ -257,96 +309,48 @@ export default function DocsPage() {
                 </div>
 
                 <div className="p-4 rounded-xl bg-[#141C27]/70 border border-white/[0.07] text-xs text-muted leading-relaxed">
-                  <strong className="text-ink">Non-Custodial Router Guarantee:</strong> <span className="font-mono text-ink">BulldotRouter</span> retains zero persistent token or ETH balances. Unused ETH settle change and bonding curve graduation cap overages refund directly to <span className="font-mono text-ink">msg.sender</span> in the same call.
+                  <strong className="text-ink">Slippage &amp; Refund Protection:</strong> If a trade would deliver less than your minimum output or pushes a bonding curve past its 50-share graduation target, excess funds are refunded automatically inside the same transaction.
                 </div>
               </SpotlightCard>
             </Reveal>
           )}
 
-          {activeSection === 'math' && (
-            <Reveal>
-              <SpotlightCard className="p-6 sm:p-8 space-y-5">
-                <span className="font-mono text-[10px] uppercase tracking-micro text-[#00E599]">
-                  03 / AMM &amp; Split-Invariant Accounting
-                </span>
-                <h2 className="font-display text-2xl font-semibold text-white tracking-tight">
-                  Bonding Curve &amp; B20 Share Normalization
-                </h2>
-                <p className="text-sm text-muted leading-relaxed">
-                  Real-world corporate stock splits alter share multipliers over time, meaning <span className="font-mono text-ink">1 ERC-20 Token != 1 Underlying Share</span>. Every curve normalizes accumulated deposits into canonical shares via the paired stock&apos;s on-chain <span className="font-mono text-ink">tokensToShares()</span> oracle.
-                </p>
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-                  <div className="p-4 rounded-xl bg-[#080B10] border border-white/[0.07]">
-                    <span className="text-muted block">Total Supply</span>
-                    <span className="font-mono text-lg font-semibold text-white mt-1 block">
-                      1,000,000,000
-                    </span>
-                    <span className="text-[11px] text-muted">Fixed cap • No mint()</span>
-                  </div>
-                  <div className="p-4 rounded-xl bg-[#080B10] border border-white/[0.07]">
-                    <span className="text-muted block">Curve / LP Split</span>
-                    <span className="font-mono text-lg font-semibold text-[#7CA8FF] mt-1 block">
-                      800M / 200M
-                    </span>
-                    <span className="text-[11px] text-muted">200M reserved for v4 LP</span>
-                  </div>
-                  <div className="p-4 rounded-xl bg-[#080B10] border border-white/[0.07]">
-                    <span className="text-muted block">Graduation Target</span>
-                    <span className="font-mono text-lg font-semibold text-[#00E599] mt-1 block">
-                      50 Shares
-                    </span>
-                    <span className="text-[11px] text-muted">Normalized canonical equity</span>
-                  </div>
-                </div>
-
-                <div className="p-4 rounded-xl bg-[#080B10] border border-white/[0.08] font-mono text-xs text-ink space-y-2">
-                  <div>CanonicalShares = (netB20 * 1e18) / multiplier</div>
-                  <div className="text-[#00E599]">SellPayout = min(grossB20, stock.balanceOf(curve))</div>
-                  <div className="text-muted text-[11px] font-sans">
-                    Excess capital above the 50-share graduation mark refunds upfront before assessing fees, and optional <span className="font-mono text-ink">maxWalletTokens</span> caps protect early curves from single-wallet cornering until graduation.
-                  </div>
-                </div>
-              </SpotlightCard>
-            </Reveal>
-          )}
-
-          {activeSection === 'treasury' && (
+          {activeSection === 'safety' && (
             <Reveal>
               <SpotlightCard className="p-6 sm:p-8 space-y-5">
                 <span className="font-mono text-[10px] uppercase tracking-micro text-[#7CA8FF]">
-                  04 / Fee Vault &amp; Security Guarantees
+                  04 / Fees &amp; Protections
                 </span>
                 <h2 className="font-display text-2xl font-semibold text-white tracking-tight">
-                  Immutable Creator Rewards &amp; 0.10% Testnet Cap
+                  Built for Stock Splits, Transparent Fees &amp; Autonomy
                 </h2>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
                   <div className="p-4 rounded-xl bg-[#080B10] border border-white/[0.07] space-y-1.5">
-                    <div className="text-white font-semibold">Zero Admin Custody Over Vault Fees</div>
+                    <div className="text-white font-semibold">Split-Safe Equity Math</div>
                     <p className="text-muted leading-relaxed">
-                      <span className="font-mono text-ink">BulldotFeeVault.sol</span> holds fees solely for the token&apos;s designated <span className="font-mono text-ink">feeRecipient</span>. No factory owner or protocol multisig can freeze, skim, or redirect user creator rewards.
+                      If a company conducts a stock split, B20 multipliers adjust the token-per-share ratio on-chain. Curves measure progress in normalized shares so splits never trap funds or distort graduation.
                     </p>
                   </div>
 
                   <div className="p-4 rounded-xl bg-[#080B10] border border-white/[0.07] space-y-1.5">
-                    <div className="text-white font-semibold">Permissionless Stock Treasury Burn</div>
+                    <div className="text-white font-semibold">Non-Custodial Creator Vault (0–2.5%)</div>
                     <p className="text-muted leading-relaxed">
-                      When redirected to <span className="font-mono text-ink">0x...dEaD</span>, calling <span className="font-mono text-ink">claimFees(token, stock)</span> becomes completely permissionless so anyone can finalize equity burns on-chain.
+                      Creator swap fees accumulate exclusively for the token&apos;s designated recipient. Protocol owners have zero ability to freeze, skim, or claim creator fees.
                     </p>
                   </div>
 
                   <div className="p-4 rounded-xl bg-[#080B10] border border-white/[0.07] space-y-1.5">
-                    <div className="text-white font-semibold">Hard-Capped Protocol Fee (&le; 0.10%)</div>
+                    <div className="text-white font-semibold">Stock Treasury Burn Option</div>
                     <p className="text-muted leading-relaxed">
-                      Both <span className="font-mono text-ink">BulldotFactory</span> and <span className="font-mono text-ink">BulldotBondingCurve</span> enforce <span className="font-mono text-ink">MAX_PROTOCOL_FEE_BPS = 10</span> (0.10% maximum). On Base Sepolia it routes to <span className="font-mono text-[#00E599]">0xc961...212A</span>; Base Mainnet defaults to paused with <span className="font-mono text-ink">0 bps</span>.
+                      Creators can route fees permanently to <span className="font-mono text-ink">0x...dEaD</span> and renounce manager rights from the Creator Hub, making equity buyback burns permissionless for everyone.
                     </p>
                   </div>
 
                   <div className="p-4 rounded-xl bg-[#080B10] border border-white/[0.07] space-y-1.5">
-                    <div className="text-white font-semibold">EIP-2612 &amp; Reentrancy Hardening</div>
+                    <div className="text-white font-semibold">Strict Protocol Cap (&le; 0.10%)</div>
                     <p className="text-muted leading-relaxed">
-                      <span className="font-mono text-ink">BulldotToken</span> enforces low-order <span className="font-mono text-ink">s</span> signatures and dynamic domain separator recomputation. All router and AMM state transitions follow CEI under <span className="font-mono text-ink">nonReentrant</span> mutexes.
+                      Base Sepolia applies a fixed 0.10% testnet treasury fee. Base Mainnet deploys paused with 0.00% protocol fee until official Coinbase B20 contracts launch on Base.
                     </p>
                   </div>
                 </div>
@@ -360,15 +364,33 @@ export default function DocsPage() {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
                     <span className="font-mono text-[10px] uppercase tracking-micro text-[#00E599]">
-                      05 / On-Chain Registry
+                      05 / Live Contracts &amp; Domains
                     </span>
                     <h2 className="font-display text-2xl font-semibold text-white tracking-tight mt-0.5">
-                      Verified Base Sepolia Contracts
+                      Verified Base Sepolia Deployment
                     </h2>
                   </div>
                   <span className="px-2.5 py-1 rounded-lg bg-[#0052FF]/15 border border-[#0052FF]/35 text-[11px] font-mono text-[#7CA8FF]">
                     Chain ID 84532 • Block #{sepolia.deploymentBlock.toString()}
                   </span>
+                </div>
+
+                <div className="p-4 rounded-xl bg-[#0052FF]/10 border border-[#0052FF]/30 text-xs text-muted flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <span className="text-ink font-semibold block">Web Deployment Status</span>
+                    <span>
+                      Live testnet interface at{' '}
+                      <a
+                        href="https://web-oak14.vercel.app"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-[#7CA8FF] underline font-mono"
+                      >
+                        web-oak14.vercel.app
+                      </a>{' '}
+                      while transitioning to primary domain <strong className="text-[#00E599]">bulldot.xyz</strong>.
+                    </span>
+                  </div>
                 </div>
 
                 <div className="space-y-2">
@@ -415,4 +437,3 @@ export default function DocsPage() {
     </div>
   );
 }
-
