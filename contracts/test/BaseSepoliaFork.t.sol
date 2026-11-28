@@ -107,10 +107,14 @@ contract BaseSepoliaForkTest is Test {
         assertTrue(PoolId.unwrap(poolId) != bytes32(0), "PoolId must be valid");
 
         assertEq(bCOIN.balanceOf(feeRecipient), expectedCreatorFee);
+        assertEq(bCOIN.balanceOf(address(factory)), 0, "Factory must retain zero B20");
+        assertEq(BulldotToken(tokenAddr).balanceOf(address(factory)), 0, "Factory must retain zero tokens");
 
         address dead = address(0x000000000000000000000000000000000000dEaD);
-        assertEq(bCOIN.balanceOf(dead), expectedNetB20);
-        assertEq(BulldotToken(tokenAddr).balanceOf(dead), 1_000_000_000 * 1e18);
+        // Active reserves sit inside Base Sepolia PoolManager while rounding dust goes to 0x...dEaD
+        assertTrue(bCOIN.balanceOf(BASE_SEPOLIA_POOL_MANAGER) > expectedNetB20 * 99 / 100);
+        assertTrue(BulldotToken(tokenAddr).balanceOf(BASE_SEPOLIA_POOL_MANAGER) > 990_000_000 * 1e18);
+        assertEq(bCOIN.balanceOf(BASE_SEPOLIA_POOL_MANAGER) + bCOIN.balanceOf(dead), expectedNetB20);
     }
 
     function test_ForkBaseSepolia_BondingCurveLaunchAndMigration() public {
@@ -145,10 +149,81 @@ contract BaseSepoliaForkTest is Test {
         curve.buy(70 * 1e18, 0, buyer);
 
         assertTrue(curve.isGraduated(), "Curve must auto-graduate on live fork");
+        assertEq(bCOIN.balanceOf(curveAddr), 0, "Curve must retain zero B20 post-graduation");
+        assertEq(BulldotToken(tokenAddr).balanceOf(curveAddr), 0, "Curve must retain zero tokens post-graduation");
+        assertTrue(bCOIN.balanceOf(BASE_SEPOLIA_POOL_MANAGER) > 45 * 1e18, "Migrated B20 locked in v4 PoolManager");
+        assertTrue(BulldotToken(tokenAddr).balanceOf(BASE_SEPOLIA_POOL_MANAGER) > 195_000_000 * 1e18, "Migrated tokens locked in v4 PoolManager");
+    }
 
-        address dead = address(0x000000000000000000000000000000000000dEaD);
-        assertTrue(bCOIN.balanceOf(dead) > 0);
-        assertTrue(BulldotToken(tokenAddr).balanceOf(dead) > 0);
+    function test_ForkBaseSepolia_InstantPoolEthToTokenSwapAndSell() public {
+        if (block.chainid != 84532) {
+            console2.log("Not on Base Sepolia fork, skipping instant v4 ETH routing test.");
+            return;
+        }
+
+        vm.startPrank(owner);
+        BulldotRouter router = new BulldotRouter(address(factory), BASE_SEPOLIA_POOL_MANAGER);
+        router.setEthPoolConfig(address(bCOIN), 500, 10);
+        vm.stopPrank();
+
+        // 1. Seed ETH/bCOIN at realistic parity (1 ETH = ~12 bCOIN) on real Base Sepolia PoolManager
+        vm.deal(creator, 1 ether);
+        vm.startPrank(creator);
+        bCOIN.approve(address(router), type(uint256).max);
+        router.seedEthStockPool{value: 0.01 ether}(address(bCOIN), 0.12e18);
+
+        // 2. Launch Instant Uniswap v4 Pool
+        (address tokenAddr, ) = factory.createInstantPool(
+            IBulldotFactory.InstantPoolParams({
+                name: "BaseMeme",
+                symbol: "BASEMEME",
+                b20Stock: address(bCOIN),
+                b20Amount: 5 * 1e18,
+                feeRecipient: feeRecipient,
+                creatorFeeBps: 100
+            })
+        );
+        vm.stopPrank();
+
+        // 3. Quote and buy via 2-hop ETH -> bCOIN -> BASEMEME on real Uniswap v4
+        (uint256 quotedTokens, uint256 estStock, , ) = router.getQuoteEthToTokens(
+            tokenAddr,
+            address(bCOIN),
+            0.0002 ether
+        );
+        assertTrue(quotedTokens > 100_000 * 1e18 && estStock > 0, "Quote must reflect real token output");
+
+        vm.deal(buyer, 1 ether);
+        vm.prank(buyer);
+        uint256 tokensBought = router.swapEthForTokens{value: 0.0002 ether}(
+            tokenAddr,
+            address(bCOIN),
+            (quotedTokens * 99) / 100,
+            buyer,
+            block.timestamp + 300
+        );
+        assertApproxEqRel(tokensBought, quotedTokens, 0.01e18, "Real v4 swap must match quote within 1%");
+
+        // 4. Sell half back via 2-hop BASEMEME -> bCOIN -> ETH on real Uniswap v4
+        uint256 sellAmt = tokensBought / 2;
+        (uint256 quotedEth, , , ) = router.getQuoteTokensToEth(tokenAddr, address(bCOIN), sellAmt);
+        assertTrue(quotedEth > 0);
+
+        vm.startPrank(buyer);
+        BulldotToken(tokenAddr).approve(address(router), sellAmt);
+        uint256 ethBefore = buyer.balance;
+        uint256 ethOut = router.swapTokensForEth(
+            tokenAddr,
+            address(bCOIN),
+            sellAmt,
+            (quotedEth * 99) / 100,
+            buyer,
+            block.timestamp + 300
+        );
+        vm.stopPrank();
+
+        assertApproxEqRel(ethOut, quotedEth, 0.01e18, "Real v4 sell must return ETH within 1% of quote");
+        assertEq(buyer.balance, ethBefore + ethOut);
     }
 
     function test_ForkBaseSepolia_RealV4EthToStockToMemeAndSellToEth() public {

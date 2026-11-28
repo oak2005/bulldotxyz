@@ -109,6 +109,13 @@ export const FACTORY_ABI = [
   },
   {
     type: 'function',
+    name: 'tokenToStock',
+    inputs: [{ name: 'token', type: 'address' }],
+    outputs: [{ name: '', type: 'address' }],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
     name: 'isOfficialLaunch',
     inputs: [{ name: 'token', type: 'address' }],
     outputs: [{ name: '', type: 'bool' }],
@@ -350,6 +357,21 @@ export const ROUTER_ABI = [
       { name: 'sqrtPriceX96', type: 'uint160' },
       { name: 'liquidity', type: 'uint128' },
       { name: 'virtualEth', type: 'uint256' },
+      { name: 'virtualStock', type: 'uint256' },
+    ],
+    stateMutability: 'view',
+  },
+  {
+    type: 'function',
+    name: 'getTokenStockReserves',
+    inputs: [
+      { name: 'token', type: 'address' },
+      { name: 'b20Stock', type: 'address' },
+    ],
+    outputs: [
+      { name: 'sqrtPriceX96', type: 'uint160' },
+      { name: 'liquidity', type: 'uint128' },
+      { name: 'virtualToken', type: 'uint256' },
       { name: 'virtualStock', type: 'uint256' },
     ],
     stateMutability: 'view',

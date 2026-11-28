@@ -5,14 +5,16 @@ import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ConnectButton } from '@rainbow-me/rainbowkit';
 import { Check, ChevronDown, ChevronUp, Droplets, Rocket, ArrowRightLeft, Wallet } from 'lucide-react';
-import { useAccount } from 'wagmi';
+import { useAccount, useChainId } from 'wagmi';
+import { baseSepolia } from 'wagmi/chains';
 import { useProtocol } from '../context/ProtocolContext';
 import { snappySpring, TactileButton, TactileLink } from './MotionPrimitives';
 
 export function OnboardingGuide() {
-  const { isConnected } = useAccount();
+  const { isConnected, chainId: connectedChainId } = useAccount();
+  const configChainId = useChainId();
+  const isOnBaseSepolia = isConnected && (connectedChainId ?? configChainId) === baseSepolia.id;
   const {
-    isSepolia,
     ethBalance,
     stockBalances,
     tokenBalances,
@@ -33,8 +35,8 @@ export function OnboardingGuide() {
     {
       id: 'wallet',
       title: 'Connect Base Sepolia',
-      detail: 'Link wallet to network 84532',
-      done: isConnected && isSepolia,
+      detail: 'Link any EVM wallet to network 84532',
+      done: isOnBaseSepolia,
       icon: Wallet,
     },
     {

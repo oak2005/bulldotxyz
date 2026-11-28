@@ -85,6 +85,7 @@ interface IBulldotFactory {
     function isDeployedCurve(address curve) external view returns (bool);
     function isOfficialLaunch(address token) external view returns (bool);
     function tokenToCurve(address token) external view returns (address);
+    function tokenToStock(address token) external view returns (address);
     function allTokensCount() external view returns (uint256);
     function owner() external view returns (address);
 

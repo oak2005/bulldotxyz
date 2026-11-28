@@ -180,7 +180,12 @@ export default function ExplorePage() {
                         v4 Live
                       </span>
                     )}
-                    {token.mode === 'INSTANT' && (
+                    {token.mode === 'INSTANT' && token.hasActiveLiquidity === false && (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-mono uppercase tracking-micro bg-red-950/60 text-red-300 border border-red-800/60">
+                        0 v4 Liq
+                      </span>
+                    )}
+                    {token.mode === 'INSTANT' && token.hasActiveLiquidity !== false && (
                       <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-mono uppercase tracking-micro bg-[#00E599]/10 text-[#00E599] border border-[#00E599]/30">
                         <Flame className="w-3 h-3" strokeWidth={1.6} />
                         Instant v4

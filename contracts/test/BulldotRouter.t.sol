@@ -305,5 +305,67 @@ contract BulldotRouterTest is Test {
         assertApproxEqRel(ethGot, quotedEth, 0.01e18);
         assertEq(buyer.balance, ethBefore + ethGot);
     }
+
+    function test_RouterSwapEthToInstantPoolAndBackToEth() public {
+        // Seed ETH / bCOIN pool at realistic parity (1 ETH = 12.5 bCOIN)
+        vm.deal(creator, 10 ether);
+        bCOIN.mint(creator, 100 * 1e18);
+        vm.startPrank(creator);
+        bCOIN.approve(address(router), type(uint256).max);
+        bCOIN.approve(address(factory), type(uint256).max);
+        router.seedEthStockPool{value: 1 ether}(address(bCOIN), 12.5e18);
+
+        (address tokenAddr, ) = factory.createInstantPool(
+            IBulldotFactory.InstantPoolParams({
+                name: "Instant Equity Meme",
+                symbol: "IEM",
+                b20Stock: address(bCOIN),
+                b20Amount: 5 * 1e18,
+                feeRecipient: creator,
+                creatorFeeBps: 100
+            })
+        );
+        vm.stopPrank();
+
+        // Direct quote must reflect true multi-million token rate (NOT 1:1)
+        (uint256 quotedFor1Stock, , ) = router.getQuote(tokenAddr, 1e18, false);
+        assertTrue(quotedFor1Stock > 100_000_000 * 1e18, "Instant quote must reflect actual v4 reserve ratio");
+
+        // 2-hop ETH buy
+        (uint256 quotedTokens, uint256 estStock, , ) = router.getQuoteEthToTokens(tokenAddr, address(bCOIN), 0.05 ether);
+        assertTrue(quotedTokens > 10_000_000 * 1e18 && estStock > 0);
+
+        vm.deal(buyer, 2 ether);
+        vm.prank(buyer);
+        uint256 bought = router.swapEthForTokens{value: 0.05 ether}(
+            tokenAddr,
+            address(bCOIN),
+            (quotedTokens * 99) / 100,
+            buyer,
+            block.timestamp + 300
+        );
+        assertApproxEqRel(bought, quotedTokens, 0.01e18);
+
+        // 2-hop ETH sell
+        uint256 sellAmt = bought / 2;
+        (uint256 quotedEth, , , ) = router.getQuoteTokensToEth(tokenAddr, address(bCOIN), sellAmt);
+        assertTrue(quotedEth > 0);
+
+        vm.startPrank(buyer);
+        BulldotToken(tokenAddr).approve(address(router), sellAmt);
+        uint256 ethBefore = buyer.balance;
+        uint256 ethOut = router.swapTokensForEth(
+            tokenAddr,
+            address(bCOIN),
+            sellAmt,
+            (quotedEth * 99) / 100,
+            buyer,
+            block.timestamp + 300
+        );
+        vm.stopPrank();
+
+        assertApproxEqRel(ethOut, quotedEth, 0.01e18);
+        assertEq(buyer.balance, ethBefore + ethOut);
+    }
 }
 

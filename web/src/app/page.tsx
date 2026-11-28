@@ -170,9 +170,15 @@ function SwapContent() {
 
   const formattedToAmount = isQuoting
     ? '...'
+    : rawToAmount <= 0
+    ? '0'
     : isTokenToStock
     ? rawToAmount.toFixed(6)
-    : Math.floor(rawToAmount).toLocaleString();
+    : rawToAmount >= 1000
+    ? Math.floor(rawToAmount).toLocaleString()
+    : rawToAmount >= 1
+    ? rawToAmount.toLocaleString(undefined, { maximumFractionDigits: 4 })
+    : rawToAmount.toFixed(6);
 
   const minReceived = (rawToAmount * (1 - effectiveSlippage / 100)).toLocaleString(undefined, {
     maximumFractionDigits: isTokenToStock ? 6 : 0,
@@ -563,6 +569,17 @@ function SwapContent() {
                   })}
                 </div>
 
+                {activeToken.hasActiveLiquidity === false && (
+                  <div className="p-2.5 bg-red-950/50 border border-red-800/60 rounded-xl text-[11px] text-red-200 flex items-center justify-between gap-2">
+                    <span>
+                      Zero active Uniswap v4 liquidity in this legacy pool. Launch a fresh v2 pool or select an active curve.
+                    </span>
+                    <Link href="/launch" className="underline font-semibold text-[#00E599] whitespace-nowrap">
+                      Launch Pool
+                    </Link>
+                  </div>
+                )}
+
                 {useEthRoute && !isEthPoolSeeded && (
                   <div className="p-2.5 bg-amber-950/40 border border-amber-800/60 rounded-xl text-[11px] text-amber-200 flex items-center justify-between gap-2">
                     <span>ETH/{activeStock.symbol} pool not seeded on current Router.</span>
@@ -572,6 +589,21 @@ function SwapContent() {
                       className="underline font-semibold text-amber-300 whitespace-nowrap"
                     >
                       Use {activeStock.symbol}
+                    </button>
+                  </div>
+                )}
+
+                {useEthRoute && isEthPoolSeeded && numericPriceImpact > 15 && activeToken.hasActiveLiquidity !== false && (
+                  <div className="p-2.5 bg-amber-950/40 border border-amber-800/60 rounded-xl text-[11px] text-amber-200 flex items-center justify-between gap-2">
+                    <span>
+                      Thin testnet ETH pool ({priceImpact}% impact). Lower ETH size or swap {activeStock.symbol} directly.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleRoute(false)}
+                      className="underline font-semibold text-amber-300 whitespace-nowrap"
+                    >
+                      Direct {activeStock.symbol}
                     </button>
                   </div>
                 )}
@@ -874,6 +906,10 @@ function SwapContent() {
                         </TactileButton>
                       )}
                     </div>
+                  ) : activeToken.hasActiveLiquidity === false ? (
+                    <TactileButton disabled variant="secondary" className="w-full py-3.5 text-xs text-red-300 border-red-800/60">
+                      Pool Has Zero Active v4 Liquidity
+                    </TactileButton>
                   ) : exceedsMaxWallet ? (
                     <TactileButton disabled variant="secondary" className="w-full py-3.5 text-xs text-amber-300 border-amber-800/60">
                       Exceeds {((activeToken.maxWalletBps || 200) / 100).toFixed(1)}% Max-Wallet Cap — Lower Amount
@@ -881,7 +917,7 @@ function SwapContent() {
                   ) : (
                     <TactileButton
                       variant={useEthRoute ? 'emerald' : 'primary'}
-                      disabled={parsedFrom <= 0 || isQuoting || txState !== 'IDLE' || (useEthRoute && !isEthPoolSeeded)}
+                      disabled={parsedFrom <= 0 || isQuoting || rawToAmount <= 0 || txState !== 'IDLE' || (useEthRoute && !isEthPoolSeeded)}
                       onClick={handleSwap}
                       className="w-full py-3.5 text-xs space-x-2"
                     >

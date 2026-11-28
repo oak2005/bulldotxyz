@@ -122,11 +122,25 @@ contract BulldotFactoryTest is Test {
         assertEq(bCOIN.balanceOf(feeRecipient), expectedCreatorFee, "Creator fee should be delivered");
 
         address deadAddress = address(0x000000000000000000000000000000000000dEaD);
-        assertEq(bCOIN.balanceOf(deadAddress), expectedNetB20, "Net B20 must be locked in Dead address");
-        assertEq(BulldotToken(tokenAddr).balanceOf(deadAddress), 1_000_000_000 * 1e18, "100% token supply locked in Dead address");
+        assertTrue(poolManager.poolLiquidity(PoolId.unwrap(poolId)) > 0, "PoolManager must hold active LP liquidity");
+        assertEq(
+            bCOIN.balanceOf(address(poolManager)) + bCOIN.balanceOf(deadAddress),
+            expectedNetB20,
+            "100% of net B20 must be locked across PoolManager LP and Dead dust"
+        );
+        assertEq(
+            BulldotToken(tokenAddr).balanceOf(address(poolManager)) + BulldotToken(tokenAddr).balanceOf(deadAddress),
+            1_000_000_000 * 1e18,
+            "100% of token supply must be locked across PoolManager LP and Dead dust"
+        );
+        assertTrue(
+            bCOIN.balanceOf(address(poolManager)) >= (expectedNetB20 * 99) / 100,
+            "At least 99% of net B20 must be active inside PoolManager"
+        );
 
         assertEq(bCOIN.balanceOf(address(factory)), 0, "Factory should hold zero B20");
         assertEq(BulldotToken(tokenAddr).balanceOf(address(factory)), 0, "Factory should hold zero tokens");
+        assertEq(factory.tokenToStock(tokenAddr), address(bCOIN), "Factory must track tokenToStock");
 
         assertEq(factory.totalLaunchedTokens(), 1);
     }
@@ -171,8 +185,14 @@ contract BulldotFactoryTest is Test {
         assertTrue(curve.isGraduated(), "Curve must be automatically graduated");
 
         address dead = address(0x000000000000000000000000000000000000dEaD);
-        assertTrue(bCOIN.balanceOf(dead) > 0, "B20 reserves must be locked in Dead address");
-        assertTrue(BulldotToken(tokenAddr).balanceOf(dead) > 0, "Token reserves must be locked in Dead address");
+        assertTrue(
+            bCOIN.balanceOf(address(poolManager)) + bCOIN.balanceOf(dead) > 0,
+            "B20 reserves must be locked in PoolManager LP"
+        );
+        assertTrue(
+            BulldotToken(tokenAddr).balanceOf(address(poolManager)) + BulldotToken(tokenAddr).balanceOf(dead) > 0,
+            "Token reserves must be locked in PoolManager LP"
+        );
 
         assertEq(bCOIN.balanceOf(curveAddr), 0, "Curve B20 balance must be zero");
         assertEq(BulldotToken(tokenAddr).balanceOf(curveAddr), 0, "Curve token balance must be zero");

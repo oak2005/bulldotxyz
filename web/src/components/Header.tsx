@@ -27,9 +27,10 @@ import { TactileButton, snappySpring, gentleSpring } from './MotionPrimitives';
 
 export function Header() {
   const pathname = usePathname();
-  const chainId = useChainId();
+  const configChainId = useChainId();
   const { switchChain } = useSwitchChain();
-  const { isConnected } = useAccount();
+  const { isConnected, chainId: connectedChainId } = useAccount();
+  const chainId = isConnected && connectedChainId ? connectedChainId : configChainId;
   const {
     ethBalance,
     stockBalances,
@@ -91,7 +92,7 @@ export function Header() {
 
   return (
     <>
-      {/* Persistent Mainnet Paused Banner */}
+      {/* Persistent Mainnet Paused or Wrong Network Banner */}
       <AnimatePresence>
         {isMainnet && (
           <motion.div
@@ -106,6 +107,31 @@ export function Header() {
                 <Pause className="w-4 h-4 text-amber-400 shrink-0" strokeWidth={1.6} />
                 <span>
                   <strong className="text-white">Base Mainnet Paused:</strong> Mainnet pools are paused pending official Coinbase B20 rollout. Switch to Base Sepolia Testnet for live swaps and launches.
+                </span>
+              </div>
+              <TactileButton
+                variant="emerald"
+                onClick={() => switchChain?.({ chainId: baseSepolia.id })}
+                className="px-3 py-1 text-[11px] rounded-lg whitespace-nowrap"
+              >
+                Switch to Base Sepolia
+              </TactileButton>
+            </div>
+          </motion.div>
+        )}
+        {isConnected && !isSupported && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={gentleSpring}
+            className="bg-[#0052FF]/20 border-b border-[#0052FF]/45 text-ink px-4 py-2 text-xs z-50 overflow-hidden"
+          >
+            <div className="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center space-x-2">
+                <AlertTriangle className="w-4 h-4 text-[#7CA8FF] shrink-0" strokeWidth={1.6} />
+                <span>
+                  Wallet connected on network <span className="font-mono text-white">#{chainId}</span>. Switch to <strong className="text-[#00E599]">Base Sepolia Testnet (84532)</strong> to trade and launch.
                 </span>
               </div>
               <TactileButton

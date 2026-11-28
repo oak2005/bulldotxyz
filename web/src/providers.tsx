@@ -2,24 +2,87 @@
 
 import React from 'react';
 import '@rainbow-me/rainbowkit/styles.css';
-import { getDefaultConfig, RainbowKitProvider, darkTheme } from '@rainbow-me/rainbowkit';
-import { WagmiProvider, http, fallback } from 'wagmi';
+import { connectorsForWallets, RainbowKitProvider, darkTheme } from '@rainbow-me/rainbowkit';
+import {
+  injectedWallet,
+  baseAccount,
+  coinbaseWallet,
+  metaMaskWallet,
+  rainbowWallet,
+  walletConnectWallet,
+  trustWallet,
+  okxWallet,
+  rabbyWallet,
+  phantomWallet,
+  zerionWallet,
+  uniswapWallet,
+  bitgetWallet,
+  binanceWallet,
+  braveWallet,
+  safepalWallet,
+  tokenPocketWallet,
+  safeWallet,
+} from '@rainbow-me/rainbowkit/wallets';
+import { createConfig, WagmiProvider, http, fallback } from 'wagmi';
 import { base, baseSepolia } from 'wagmi/chains';
 import { QueryClientProvider, QueryClient } from '@tanstack/react-query';
 import { ProtocolProvider } from './context/ProtocolContext';
 
-const config = getDefaultConfig({
-  appName: 'bulldotxyz',
-  projectId: 'a0b9435b866504a29a07119ff339e802', // Standard public walletconnect ID or demo ID
+const walletConnectProjectId =
+  process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || 'a0b9435b866504a29a07119ff339e802';
+
+const connectors = connectorsForWallets(
+  [
+    {
+      groupName: 'Recommended & Browser',
+      wallets: [
+        injectedWallet,
+        baseAccount,
+        coinbaseWallet,
+        metaMaskWallet,
+        rainbowWallet,
+        walletConnectWallet,
+      ],
+    },
+    {
+      groupName: 'More EVM Wallets',
+      wallets: [
+        trustWallet,
+        okxWallet,
+        rabbyWallet,
+        phantomWallet,
+        zerionWallet,
+        uniswapWallet,
+        bitgetWallet,
+        binanceWallet,
+        braveWallet,
+        safepalWallet,
+        tokenPocketWallet,
+        safeWallet,
+      ],
+    },
+  ],
+  {
+    appName: 'bulldotxyz',
+    appDescription:
+      'Base DEX & fair launchpad paired with Coinbase B20 tokenized stocks.',
+    appUrl: 'https://bulldot.xyz',
+    projectId: walletConnectProjectId,
+  }
+);
+
+const config = createConfig({
+  connectors,
   chains: [baseSepolia, base],
+  multiInjectedProviderDiscovery: true,
   transports: {
     [baseSepolia.id]: fallback([
-      http('https://sepolia.base.org'),
       http('https://base-sepolia-rpc.publicnode.com'),
+      http('https://sepolia.base.org'),
     ]),
     [base.id]: fallback([
-      http('https://mainnet.base.org'),
       http('https://base-rpc.publicnode.com'),
+      http('https://mainnet.base.org'),
     ]),
   },
   ssr: true,
@@ -41,6 +104,8 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <WagmiProvider config={config}>
       <QueryClientProvider client={queryClient}>
         <RainbowKitProvider
+          initialChain={baseSepolia}
+          modalSize="compact"
           theme={darkTheme({
             accentColor: '#0052FF',
             accentColorForeground: 'white',

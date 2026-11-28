@@ -5,7 +5,8 @@ import {IB20Stock} from "./interfaces/IB20Stock.sol";
 import {BulldotToken} from "./BulldotToken.sol";
 import {BulldotFeeVault} from "./BulldotFeeVault.sol";
 import {IBulldotBondingCurve} from "./interfaces/IBulldotBondingCurve.sol";
-import {PoolKey, PoolId, PoolIdLibrary, IPoolManager, IPositionManager} from "./interfaces/IUniswapV4Minimal.sol";
+import {BulldotV4Math} from "./libraries/BulldotV4Math.sol";
+import {PoolKey, PoolId, PoolIdLibrary, IPoolManager, IUnlockCallback} from "./interfaces/IUniswapV4Minimal.sol";
 
 /**
  * @notice SECURITY NOTES:
@@ -26,10 +27,10 @@ import {PoolKey, PoolId, PoolIdLibrary, IPoolManager, IPositionManager} from "./
  *   Creator fees route into BulldotFeeVault. If the fee recipient is unpayable or blocked, fees buffer safely
  *   without bricking the trade.
  * - PERMANENT UNISWAP V4 LIQUIDITY LOCK:
- *   Upon graduation, liquidity is deployed to Uniswap v4 via PositionManager and permanently minted to
- *   `0x000000000000000000000000000000000000dEaD`.
+ *   Upon graduation, 100% of liquidity is added directly into Uniswap v4 PoolManager with zero withdrawal path,
+ *   permanently locking the LP position while forwarding any rounding dust to `0x...dEaD`.
  */
-contract BulldotBondingCurve is IBulldotBondingCurve {
+contract BulldotBondingCurve is IBulldotBondingCurve, IUnlockCallback {
     using PoolIdLibrary for PoolKey;
 
     // --- Custom Errors ---
@@ -89,8 +90,16 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
     address public immutable poolManager;
     address public immutable positionManager;
 
-    // Reentrancy Guard
+    // Reentrancy & Unlock Guard
     uint256 private _status = 1;
+    uint256 private _unlockContext;
+
+    struct GraduationLockData {
+        PoolKey key;
+        uint128 liquidityDelta;
+        uint256 maxAmount0;
+        uint256 maxAmount1;
+    }
     modifier nonReentrant() {
         if (_status != 1) revert Reentrancy();
         _status = 2;
@@ -477,61 +486,74 @@ contract BulldotBondingCurve is IBulldotBondingCurve {
 
         uint160 sqrtPriceX96 = calculateSqrtPriceX96(amount0, amount1);
 
-        // 1. Initialize pool on Uniswap v4 PoolManager
+        // 1. Initialize & permanently lock full-range liquidity directly in Uniswap v4 PoolManager
         if (poolManager != address(0)) {
-            try IPoolManager(poolManager).initialize(key, sqrtPriceX96) {} catch {}
+            IPoolManager(poolManager).initialize(key, sqrtPriceX96);
+            uint128 liquidityDelta = BulldotV4Math.computeFullRangeLiquidity(sqrtPriceX96, amount0, amount1);
+            _unlockContext = 1;
+            IPoolManager(poolManager).unlock(
+                abi.encode(
+                    GraduationLockData({
+                        key: key,
+                        liquidityDelta: liquidityDelta,
+                        maxAmount0: amount0,
+                        maxAmount1: amount1
+                    })
+                )
+            );
+            _unlockContext = 0;
         }
 
-        // 2. Deploy Liquidity & Permanently Lock to Dead Address
-        if (positionManager != address(0)) {
-            BulldotToken(token).approve(positionManager, tokenBalance);
-            IB20Stock(b20Stock).approve(positionManager, b20Balance);
-
-            IPositionManager.MintParams memory mintParams = IPositionManager.MintParams({
-                poolKey: key,
-                tickLower: TICK_LOWER,
-                tickUpper: TICK_UPPER,
-                liquidity: 0,
-                amount0Max: uint128(amount0),
-                amount1Max: uint128(amount1),
-                recipient: PERMANENT_DEAD, // Permanently minted to 0xDead!
-                hookData: ""
-            });
-
-            try IPositionManager(positionManager).mint(mintParams) {
-                // Successfully locked in Uniswap v4!
-            } catch {
-                BulldotToken(token).transfer(PERMANENT_DEAD, BulldotToken(token).balanceOf(address(this)));
-                IB20Stock(b20Stock).transfer(PERMANENT_DEAD, IB20Stock(b20Stock).balanceOf(address(this)));
-            }
-        } else {
-            BulldotToken(token).transfer(PERMANENT_DEAD, tokenBalance);
-            IB20Stock(b20Stock).transfer(PERMANENT_DEAD, b20Balance);
+        // Forward remaining reserves (if unit test without poolManager) or rounding dust (< 0.1%) to 0x...dEaD
+        uint256 remainingTokens = BulldotToken(token).balanceOf(address(this));
+        if (remainingTokens > 0) {
+            if (!BulldotToken(token).transfer(PERMANENT_DEAD, remainingTokens)) revert TransferFailed();
+        }
+        uint256 remainingB20 = IB20Stock(b20Stock).balanceOf(address(this));
+        if (remainingB20 > 0) {
+            if (!IB20Stock(b20Stock).transfer(PERMANENT_DEAD, remainingB20)) revert TransferFailed();
         }
 
         emit Graduated(token, b20Stock, poolId, b20Balance, tokenBalance, sqrtPriceX96);
     }
 
-    function calculateSqrtPriceX96(uint256 amount0, uint256 amount1) public pure returns (uint160) {
-        require(amount0 > 0 && amount1 > 0, "ZERO_RESERVES");
-        uint256 ratio = (amount1 * 1e18) / amount0;
-        uint256 sqrtRatio = sqrt(ratio);
-        uint256 price = (sqrtRatio * (1 << 96)) / 1e9;
-        if (price < MIN_SQRT_RATIO) price = MIN_SQRT_RATIO + 1;
-        if (price > MAX_SQRT_RATIO) price = MAX_SQRT_RATIO - 1;
-        return uint160(price);
+    function unlockCallback(bytes calldata rawData) external override returns (bytes memory) {
+        if (msg.sender != poolManager || _unlockContext != 1) revert Reentrancy();
+
+        GraduationLockData memory data = abi.decode(rawData, (GraduationLockData));
+        (int256 callerDelta, ) = IPoolManager(poolManager).modifyLiquidity(
+            data.key,
+            IPoolManager.ModifyLiquidityParams({
+                tickLower: TICK_LOWER,
+                tickUpper: TICK_UPPER,
+                liquidityDelta: int256(uint256(data.liquidityDelta)),
+                salt: bytes32(0)
+            }),
+            ""
+        );
+
+        int128 d0 = int128(callerDelta >> 128);
+        int128 d1 = int128(callerDelta);
+
+        uint256 used0 = d0 < 0 ? uint256(uint128(-d0)) : 0;
+        uint256 used1 = d1 < 0 ? uint256(uint128(-d1)) : 0;
+        if (used0 > data.maxAmount0 || used1 > data.maxAmount1) revert TransferFailed();
+
+        if (used0 > 0) {
+            IPoolManager(poolManager).sync(data.key.currency0);
+            if (!IB20Stock(data.key.currency0).transfer(poolManager, used0)) revert TransferFailed();
+            IPoolManager(poolManager).settle();
+        }
+        if (used1 > 0) {
+            IPoolManager(poolManager).sync(data.key.currency1);
+            if (!IB20Stock(data.key.currency1).transfer(poolManager, used1)) revert TransferFailed();
+            IPoolManager(poolManager).settle();
+        }
+
+        return abi.encode(used0, used1);
     }
 
-    function sqrt(uint256 y) internal pure returns (uint256 z) {
-        if (y > 3) {
-            z = y;
-            uint256 x = y / 2 + 1;
-            while (x < z) {
-                z = x;
-                x = (y / x + x) / 2;
-            }
-        } else if (y != 0) {
-            z = 1;
-        }
+    function calculateSqrtPriceX96(uint256 amount0, uint256 amount1) public pure returns (uint160) {
+        return BulldotV4Math.calculateSqrtPriceX96(amount0, amount1);
     }
 }

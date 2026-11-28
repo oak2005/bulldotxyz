@@ -5,14 +5,19 @@ import {
   useAccount,
   useChainId,
   usePublicClient,
+  useSwitchChain,
   useWriteContract,
 } from 'wagmi';
 import { base, baseSepolia } from 'wagmi/chains';
 import {
   Address,
   decodeEventLog,
+  encodeAbiParameters,
+  encodePacked,
   formatUnits,
   isAddress,
+  keccak256,
+  parseAbiParameters,
   parseUnits,
   zeroAddress,
 } from 'viem';
@@ -60,6 +65,7 @@ export interface TokenPair {
   tokenManager?: string;
   isManagerRenounced?: boolean;
   isTreasuryRedirected?: boolean;
+  hasActiveLiquidity?: boolean;
   claimableRawFees?: number;
   totalCollectedRawFees?: number;
   treasuryBurnedShares?: number;
@@ -172,9 +178,79 @@ const DEFAULT_STOCK_BALANCES: Record<string, number> = {
   bTSLA: 0,
 };
 
+const POOL_MANAGER_EXTSLOAD_ABI = [
+  {
+    type: 'function',
+    name: 'extsload',
+    inputs: [{ name: 'slot', type: 'bytes32' }],
+    outputs: [{ name: '', type: 'bytes32' }],
+    stateMutability: 'view',
+  },
+] as const;
+
+const POOLS_SLOT =
+  '0x0000000000000000000000000000000000000000000000000000000000000006' as const;
+const Q96 = BigInt(1) << BigInt(96);
+const MASK_160 = (BigInt(1) << BigInt(160)) - BigInt(1);
+const MASK_128 = (BigInt(1) << BigInt(128)) - BigInt(1);
+
+async function readV4TokenStockReservesDirect(
+  client: NonNullable<ReturnType<typeof usePublicClient>>,
+  poolManager: Address,
+  token: Address,
+  stock: Address
+): Promise<{ sqrtPriceX96: bigint; liquidity: bigint; virtualToken: bigint; virtualStock: bigint }> {
+  const tokenIs0 = token.toLowerCase() < stock.toLowerCase();
+  const c0 = tokenIs0 ? token : stock;
+  const c1 = tokenIs0 ? stock : token;
+  const poolId = keccak256(
+    encodeAbiParameters(parseAbiParameters('address, address, uint24, int24, address'), [
+      c0,
+      c1,
+      3000,
+      60,
+      zeroAddress,
+    ])
+  );
+  const stateSlot = keccak256(encodePacked(['bytes32', 'bytes32'], [poolId, POOLS_SLOT]));
+  const liqSlot = ('0x' + (BigInt(stateSlot) + BigInt(3)).toString(16).padStart(64, '0')) as `0x${string}`;
+
+  const [slot0Raw, liqRaw] = await Promise.all([
+    client.readContract({
+      address: poolManager,
+      abi: POOL_MANAGER_EXTSLOAD_ABI,
+      functionName: 'extsload',
+      args: [stateSlot],
+    }),
+    client.readContract({
+      address: poolManager,
+      abi: POOL_MANAGER_EXTSLOAD_ABI,
+      functionName: 'extsload',
+      args: [liqSlot],
+    }),
+  ]);
+
+  const sqrtPriceX96 = BigInt(slot0Raw) & MASK_160;
+  const liquidity = BigInt(liqRaw) & MASK_128;
+  if (sqrtPriceX96 === BigInt(0) || liquidity === BigInt(0)) {
+    return { sqrtPriceX96, liquidity: BigInt(0), virtualToken: BigInt(0), virtualStock: BigInt(0) };
+  }
+
+  const r0 = (liquidity * Q96) / sqrtPriceX96;
+  const r1 = (liquidity * sqrtPriceX96) / Q96;
+  return {
+    sqrtPriceX96,
+    liquidity,
+    virtualToken: tokenIs0 ? r0 : r1,
+    virtualStock: tokenIs0 ? r1 : r0,
+  };
+}
+
 export function ProtocolProvider({ children }: { children: React.ReactNode }) {
-  const { isConnected, address } = useAccount();
-  const chainId = useChainId();
+  const { isConnected, address, chainId: connectedChainId } = useAccount();
+  const configChainId = useChainId();
+  const chainId = isConnected && connectedChainId ? connectedChainId : configChainId;
+  const { switchChainAsync } = useSwitchChain();
   const publicClient = usePublicClient({ chainId: baseSepolia.id });
   const { writeContractAsync } = useWriteContract();
 
@@ -196,18 +272,26 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
 
   const sepoliaConfig = CONTRACT_CONFIGS[baseSepolia.id];
 
-  const ensureSepoliaWallet = () => {
+  const ensureSepoliaWallet = async () => {
     if (!isConnected || !address) {
       throw new Error('Please connect your wallet first.');
     }
-    if (chainId === base.id) {
-      throw new Error('Base Mainnet is currently paused. Please switch to Base Sepolia Testnet.');
-    }
-    if (chainId !== baseSepolia.id) {
-      throw new Error('Please switch your wallet network to Base Sepolia Testnet.');
-    }
     if (!publicClient) {
       throw new Error('Base Sepolia RPC client not ready. Please try again.');
+    }
+    if (chainId !== baseSepolia.id) {
+      if (chainId === base.id) {
+        throw new Error('Base Mainnet is currently paused. Switch your wallet to Base Sepolia Testnet.');
+      }
+      if (switchChainAsync) {
+        try {
+          await switchChainAsync({ chainId: baseSepolia.id });
+        } catch {
+          throw new Error('Please approve switching your wallet network to Base Sepolia Testnet (84532).');
+        }
+      } else {
+        throw new Error('Please switch your wallet network to Base Sepolia Testnet (84532).');
+      }
     }
   };
 
@@ -406,6 +490,7 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
             let mode: 'CURVE' | 'INSTANT' | 'GRADUATED' = 'CURVE';
             let volumeB20 = 0;
             let pricePoints: PricePoint[] = [];
+            let hasActiveLiquidity = true;
 
             if (curveAddr !== zeroAddress) {
               const [
@@ -469,21 +554,99 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
               if (vB20Num > 0 && vTokNum > 0) {
                 ratePerStock = vTokNum / vB20Num;
               }
+              if (grad) {
+                const v4Res = await readV4TokenStockReservesDirect(
+                  publicClient,
+                  sepoliaConfig.poolManager,
+                  tokenAddr,
+                  pairedStockAddr
+                ).catch(() => ({
+                  sqrtPriceX96: BigInt(0),
+                  liquidity: BigInt(0),
+                  virtualToken: BigInt(0),
+                  virtualStock: BigInt(0),
+                }));
+                hasActiveLiquidity = v4Res.liquidity > BigInt(0);
+                if (hasActiveLiquidity) {
+                  b20Reserve = Number(formatUnits(v4Res.virtualStock, 18));
+                  tokenReserve = Number(formatUnits(v4Res.virtualToken, 18));
+                  if (b20Reserve > 0) ratePerStock = tokenReserve / b20Reserve;
+                }
+              }
             } else {
               mode = 'INSTANT';
               isGraduated = true;
-              const match = instantLogs.find(
-                (l) => l.args?.token?.toLowerCase() === tokenAddr.toLowerCase()
-              );
-              if (match?.args) {
-                pairedStockAddr = match.args.b20Stock;
-                creator = match.args.creator;
-                if (feeRecipient === zeroAddress) feeRecipient = match.args.feeRecipient;
-                creatorFeeBps = Number(match.args.creatorFeeBps || 0);
-                b20Reserve = Number(formatUnits(match.args.initialB20Amount || BigInt(0), 18));
-                tokenReserve = Number(formatUnits(match.args.initialTokenAmount || BigInt(0), 18));
-                if (b20Reserve > 0) ratePerStock = tokenReserve / b20Reserve;
+
+              // 1. Resolve paired stock directly via Factory.tokenToStock if available, else logs, else PoolManager scan
+              const directStock = await publicClient
+                .readContract({
+                  address: sepoliaConfig.factory,
+                  abi: FACTORY_ABI,
+                  functionName: 'tokenToStock',
+                  args: [tokenAddr],
+                })
+                .catch(() => zeroAddress);
+
+              if (directStock && directStock !== zeroAddress) {
+                pairedStockAddr = directStock;
+              } else {
+                const match = instantLogs.find(
+                  (l) => l.args?.token?.toLowerCase() === tokenAddr.toLowerCase()
+                );
+                if (match?.args) {
+                  pairedStockAddr = match.args.b20Stock;
+                  creator = match.args.creator;
+                  if (feeRecipient === zeroAddress) feeRecipient = match.args.feeRecipient;
+                  creatorFeeBps = Number(match.args.creatorFeeBps || 0);
+                  b20Reserve = Number(formatUnits(match.args.initialB20Amount || BigInt(0), 18));
+                  tokenReserve = Number(formatUnits(match.args.initialTokenAmount || BigInt(0), 18));
+                  if (b20Reserve > 0) ratePerStock = tokenReserve / b20Reserve;
+                  sharesAccumulated = b20Reserve;
+                } else {
+                  // Scan initialized v4 pools across verified B20 stocks so pools >9000 blocks old still match
+                  const candidates = await Promise.all(
+                    VERIFIED_B20_STOCKS.map((s) =>
+                      readV4TokenStockReservesDirect(
+                        publicClient,
+                        sepoliaConfig.poolManager,
+                        tokenAddr,
+                        s.address[baseSepolia.id]
+                      )
+                        .then((r) => ({ addr: s.address[baseSepolia.id], res: r }))
+                        .catch(() => ({
+                          addr: s.address[baseSepolia.id],
+                          res: {
+                            sqrtPriceX96: BigInt(0),
+                            liquidity: BigInt(0),
+                            virtualToken: BigInt(0),
+                            virtualStock: BigInt(0),
+                          },
+                        }))
+                    )
+                  );
+                  const foundPool = candidates.find((c) => c.res.sqrtPriceX96 > BigInt(0));
+                  if (foundPool) pairedStockAddr = foundPool.addr;
+                }
+              }
+
+              // 2. Always query live Uniswap v4 PoolManager reserves to verify active liquidity & live spot rate
+              const v4Res = await readV4TokenStockReservesDirect(
+                publicClient,
+                sepoliaConfig.poolManager,
+                tokenAddr,
+                pairedStockAddr
+              ).catch(() => ({
+                sqrtPriceX96: BigInt(0),
+                liquidity: BigInt(0),
+                virtualToken: BigInt(0),
+                virtualStock: BigInt(0),
+              }));
+              hasActiveLiquidity = v4Res.liquidity > BigInt(0);
+              if (hasActiveLiquidity) {
+                b20Reserve = Number(formatUnits(v4Res.virtualStock, 18));
+                tokenReserve = Number(formatUnits(v4Res.virtualToken, 18));
                 sharesAccumulated = b20Reserve;
+                if (b20Reserve > 0) ratePerStock = tokenReserve / b20Reserve;
               }
             }
 
@@ -587,6 +750,7 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
               tokenManager: vaultManager,
               isManagerRenounced: vaultManager === zeroAddress,
               isTreasuryRedirected: isDead,
+              hasActiveLiquidity,
               claimableRawFees: pendingRaw,
               totalCollectedRawFees: totalReceived,
               treasuryBurnedShares: isDead ? rawClaimed : 0,
@@ -619,12 +783,13 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
 
   // 1. On-Chain Faucet: calls MockB20Stock.faucet() directly on Base Sepolia
   const claimFaucet = async (stockSymbol: string = 'bCOIN'): Promise<string> => {
-    ensureSepoliaWallet();
+    await ensureSepoliaWallet();
     const stock = VERIFIED_B20_STOCKS.find((s) => s.symbol === stockSymbol);
     if (!stock) throw new Error(`Unknown stock symbol: ${stockSymbol}`);
 
     try {
       const hash = await writeContractAsync({
+        chainId: baseSepolia.id,
         address: stock.address[baseSepolia.id],
         abi: STOCK_ABI,
         functionName: 'faucet',
@@ -671,6 +836,13 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
     const amountWei = toWeiSafe(amountHuman);
     if (amountWei === BigInt(0)) return emptyQuote;
 
+    const tokenMeta = communityTokens.find(
+      (t) => t.tokenAddress.toLowerCase() === tokenAddress.toLowerCase()
+    );
+    if (tokenMeta && tokenMeta.hasActiveLiquidity === false) {
+      return emptyQuote;
+    }
+
     try {
       if (useEthRoute) {
         const [outWei, estStockWei, feeWei, priceImpactBpsRaw] = await publicClient.readContract({
@@ -710,7 +882,7 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
 
   // 3. Exact ERC-20 Approval to BulldotRouter (skipped automatically if allowance >= needed)
   const executeApproval = async (assetAddress: Address, amountHuman: string): Promise<string> => {
-    ensureSepoliaWallet();
+    await ensureSepoliaWallet();
     if (assetAddress === zeroAddress) {
       return 'NATIVE_ETH_NO_APPROVAL';
     }
@@ -730,6 +902,7 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
       }
 
       const hash = await writeContractAsync({
+        chainId: baseSepolia.id,
         address: assetAddress,
         abi: ERC20_ABI,
         functionName: 'approve',
@@ -758,7 +931,7 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
     isTokenToStock: boolean;
     useEthRoute?: boolean;
   }): Promise<string> => {
-    ensureSepoliaWallet();
+    await ensureSepoliaWallet();
     const amountInWei = toWeiSafe(fromAmount);
     if (amountInWei === BigInt(0)) throw new Error('Invalid trade amount.');
 
@@ -769,6 +942,7 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
 
       if (useEthRoute && !isTokenToStock) {
         hash = await writeContractAsync({
+          chainId: baseSepolia.id,
           address: sepoliaConfig.router,
           abi: ROUTER_ABI,
           functionName: 'swapEthForTokens',
@@ -777,6 +951,7 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
         });
       } else if (useEthRoute && isTokenToStock) {
         hash = await writeContractAsync({
+          chainId: baseSepolia.id,
           address: sepoliaConfig.router,
           abi: ROUTER_ABI,
           functionName: 'swapTokensForEth',
@@ -784,6 +959,7 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
         });
       } else {
         hash = await writeContractAsync({
+          chainId: baseSepolia.id,
           address: sepoliaConfig.router,
           abi: ROUTER_ABI,
           functionName: isTokenToStock ? 'swapTokensForB20' : 'swapB20ForTokens',
@@ -821,7 +997,7 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
     feeDestination: 'CREATOR' | 'STOCK_TREASURY' | 'CUSTOM';
     customRecipient?: string;
   }): Promise<{ txHash: string; token: TokenPair }> => {
-    ensureSepoliaWallet();
+    await ensureSepoliaWallet();
 
     const selectedStock = VERIFIED_B20_STOCKS.find((s) => s.symbol === stockSymbol);
     if (!selectedStock) throw new Error(`Invalid stock selected: ${stockSymbol}`);
@@ -843,6 +1019,7 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
       if (mode === 'CURVE') {
         const maxWalletBps = antiDumpMode === '2%' ? 200 : antiDumpMode === '1%' ? 100 : 0;
         hash = await writeContractAsync({
+          chainId: baseSepolia.id,
           address: sepoliaConfig.factory,
           abi: FACTORY_ABI,
           functionName: 'createBondingCurve',
@@ -872,6 +1049,7 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
 
         if (factoryAllowance < depositWei) {
           const approveHash = await writeContractAsync({
+            chainId: baseSepolia.id,
             address: stockAddress,
             abi: ERC20_ABI,
             functionName: 'approve',
@@ -881,6 +1059,7 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
         }
 
         hash = await writeContractAsync({
+          chainId: baseSepolia.id,
           address: sepoliaConfig.factory,
           abi: FACTORY_ABI,
           functionName: 'createInstantPool',
@@ -970,10 +1149,11 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
 
   // 6. Claim Fees via BulldotFeeVault
   const executeClaimFees = async (tokenIdentifier: string): Promise<string> => {
-    ensureSepoliaWallet();
+    await ensureSepoliaWallet();
     const token = resolveToken(tokenIdentifier);
     try {
       const hash = await writeContractAsync({
+        chainId: baseSepolia.id,
         address: sepoliaConfig.feeVault,
         abi: FEE_VAULT_ABI,
         functionName: 'claimFees',
@@ -991,13 +1171,14 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
 
   // 7. Redirect Fee Recipient via BulldotFeeVault
   const executeRedirectFees = async (tokenIdentifier: string, newRecipient: string): Promise<string> => {
-    ensureSepoliaWallet();
+    await ensureSepoliaWallet();
     if (!isAddress(newRecipient)) {
       throw new Error('Please enter a valid 0x Ethereum address.');
     }
     const token = resolveToken(tokenIdentifier);
     try {
       const hash = await writeContractAsync({
+        chainId: baseSepolia.id,
         address: sepoliaConfig.feeVault,
         abi: FEE_VAULT_ABI,
         functionName: 'redirectFeeRecipient',
@@ -1013,10 +1194,11 @@ export function ProtocolProvider({ children }: { children: React.ReactNode }) {
 
   // 8. Renounce Manager Rights Permanently via BulldotFeeVault
   const executeRenounceManagement = async (tokenIdentifier: string): Promise<string> => {
-    ensureSepoliaWallet();
+    await ensureSepoliaWallet();
     const token = resolveToken(tokenIdentifier);
     try {
       const hash = await writeContractAsync({
+        chainId: baseSepolia.id,
         address: sepoliaConfig.feeVault,
         abi: FEE_VAULT_ABI,
         functionName: 'renounceTokenManager',

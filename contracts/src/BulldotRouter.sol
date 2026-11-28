@@ -5,6 +5,7 @@ import {IBulldotFactory} from "./interfaces/IBulldotFactory.sol";
 import {IBulldotBondingCurve} from "./interfaces/IBulldotBondingCurve.sol";
 import {IB20Stock} from "./interfaces/IB20Stock.sol";
 import {BulldotToken} from "./BulldotToken.sol";
+import {BulldotV4Math} from "./libraries/BulldotV4Math.sol";
 import {PoolKey, PoolId, PoolIdLibrary, IPoolManager, IUnlockCallback} from "./interfaces/IUniswapV4Minimal.sol";
 
 /**
@@ -185,8 +186,48 @@ contract BulldotRouter is IUnlockCallback {
         liquidity = uint128(uint256(liqRaw));
         if (liquidity == 0) return (sqrtPriceX96, 0, 0, 0);
 
-        virtualEth = _mulDiv(uint256(liquidity), 1 << 96, uint256(sqrtPriceX96));
-        virtualStock = _mulDiv(uint256(liquidity), uint256(sqrtPriceX96), 1 << 96);
+        virtualEth = BulldotV4Math.mulDiv(uint256(liquidity), 1 << 96, uint256(sqrtPriceX96));
+        virtualStock = BulldotV4Math.mulDiv(uint256(liquidity), uint256(sqrtPriceX96), 1 << 96);
+    }
+
+    /**
+     * @notice Reads live sqrtPriceX96, active liquidity, and derived virtual reserves for a Token/B20 v4 pool.
+     */
+    function getTokenStockReserves(address token, address b20Stock)
+        public
+        view
+        returns (
+            uint160 sqrtPriceX96,
+            uint128 liquidity,
+            uint256 virtualToken,
+            uint256 virtualStock
+        )
+    {
+        if (token == address(0) || b20Stock == address(0) || poolManager == address(0)) {
+            return (0, 0, 0, 0);
+        }
+        bool tokenIs0 = token < b20Stock;
+        PoolKey memory key = PoolKey({
+            currency0: tokenIs0 ? token : b20Stock,
+            currency1: tokenIs0 ? b20Stock : token,
+            fee: DEFAULT_POOL_FEE,
+            tickSpacing: DEFAULT_TICK_SPACING,
+            hooks: address(0)
+        });
+        PoolId id = key.toId();
+        bytes32 stateSlot = keccak256(abi.encodePacked(PoolId.unwrap(id), POOLS_SLOT));
+
+        bytes32 slot0 = IPoolManager(poolManager).extsload(stateSlot);
+        sqrtPriceX96 = uint160(uint256(slot0));
+        if (sqrtPriceX96 == 0) return (0, 0, 0, 0);
+
+        bytes32 liqRaw = IPoolManager(poolManager).extsload(bytes32(uint256(stateSlot) + 3));
+        liquidity = uint128(uint256(liqRaw));
+        if (liquidity == 0) return (sqrtPriceX96, 0, 0, 0);
+
+        (uint256 r0, uint256 r1) = BulldotV4Math.computeVirtualReserves(sqrtPriceX96, liquidity);
+        virtualToken = tokenIs0 ? r0 : r1;
+        virtualStock = tokenIs0 ? r1 : r0;
     }
 
     /**
@@ -220,7 +261,7 @@ contract BulldotRouter is IUnlockCallback {
     {
         if (amountIn == 0 || tokenOrCurve == address(0)) return (0, 0, 0);
 
-        (address curve, ) = resolveCurve(tokenOrCurve);
+        (address curve, address token) = resolveCurve(tokenOrCurve);
 
         if (curve != address(0) && !IBulldotBondingCurve(curve).isGraduated()) {
             IBulldotBondingCurve curveContract = IBulldotBondingCurve(curve);
@@ -253,9 +294,26 @@ contract BulldotRouter is IUnlockCallback {
                 }
             }
         } else {
-            fee = (amountIn * DEFAULT_POOL_FEE) / 1_000_000;
-            amountOut = amountIn - fee;
-            priceImpactBps = 30;
+            address b20Stock = curve != address(0)
+                ? IBulldotBondingCurve(curve).b20Stock()
+                : factory.tokenToStock(token);
+            if (b20Stock == address(0)) return (0, 0, 0);
+
+            (uint160 sqrtP, uint128 liq, uint256 vToken, uint256 vStock) = getTokenStockReserves(token, b20Stock);
+            if (sqrtP == 0 || liq == 0 || vToken == 0 || vStock == 0) return (0, 0, 0);
+
+            if (!isTokenToStock) {
+                fee = (amountIn * DEFAULT_POOL_FEE) / 1_000_000;
+                uint256 netIn = amountIn - fee;
+                amountOut = (vToken * netIn) / (vStock + netIn);
+                priceImpactBps = (netIn * 10_000) / (vStock + netIn);
+            } else {
+                uint256 v4TokenFee = (amountIn * DEFAULT_POOL_FEE) / 1_000_000;
+                uint256 netTokenIn = amountIn - v4TokenFee;
+                amountOut = (vStock * netTokenIn) / (vToken + netTokenIn);
+                fee = (vStock * v4TokenFee) / (vToken + netTokenIn);
+                priceImpactBps = (netTokenIn * 10_000) / (vToken + netTokenIn);
+            }
         }
     }
 
@@ -363,13 +421,7 @@ contract BulldotRouter is IUnlockCallback {
             revert TransferFailed();
         }
 
-        uint256 l0 = _mulDiv(msg.value, uint256(sqrtPriceX96), 1 << 96);
-        uint256 l1 = _mulDiv(stockAmount, 1 << 96, uint256(sqrtPriceX96));
-        uint256 liq = (l0 < l1 ? l0 : l1);
-        // Apply 0.1% rounding safety margin so settled amounts strictly fit msg.value & stockAmount
-        liq = (liq * 999) / 1000;
-        if (liq == 0 || liq > type(uint128).max) revert ZeroInput();
-        liquidityAdded = uint128(liq);
+        liquidityAdded = BulldotV4Math.computeFullRangeLiquidity(sqrtPriceX96, msg.value, stockAmount);
 
         bytes memory result = IPoolManager(poolManager).unlock(
             abi.encode(
@@ -694,11 +746,12 @@ contract BulldotRouter is IUnlockCallback {
             return abi.encode(amountInUsed, amountOut);
         } else {
             AddLiquidityCallbackData memory data = abi.decode(payload, (AddLiquidityCallbackData));
+            (int24 tickLower, int24 tickUpper) = BulldotV4Math.alignedTickBounds(data.key.tickSpacing);
             (int256 callerDelta, ) = IPoolManager(poolManager).modifyLiquidity(
                 data.key,
                 IPoolManager.ModifyLiquidityParams({
-                    tickLower: TICK_LOWER,
-                    tickUpper: TICK_UPPER,
+                    tickLower: tickLower,
+                    tickUpper: tickUpper,
                     liquidityDelta: int256(uint256(data.liquidityDelta)),
                     salt: bytes32(0)
                 }),
@@ -734,59 +787,6 @@ contract BulldotRouter is IUnlockCallback {
 
     function calculateSqrtPriceX96(uint256 amount0, uint256 amount1) public pure returns (uint160) {
         if (amount0 == 0 || amount1 == 0) revert ZeroInput();
-        uint256 ratio = _mulDiv(amount1, 1e36, amount0);
-        uint256 sqrtRatio = _sqrt(ratio);
-        uint256 price = _mulDiv(sqrtRatio, 1 << 96, 1e18);
-        if (price < MIN_SQRT_PRICE) price = MIN_SQRT_PRICE + 1;
-        if (price > MAX_SQRT_PRICE) price = MAX_SQRT_PRICE - 1;
-        return uint160(price);
-    }
-
-    function _sqrt(uint256 y) internal pure returns (uint256 z) {
-        if (y > 3) {
-            z = y;
-            uint256 x = y / 2 + 1;
-            while (x < z) {
-                z = x;
-                x = (y / x + x) / 2;
-            }
-        } else if (y != 0) {
-            z = 1;
-        }
-    }
-
-    function _mulDiv(uint256 a, uint256 b, uint256 denominator) internal pure returns (uint256 result) {
-        uint256 prod0;
-        uint256 prod1;
-        assembly {
-            let mm := mulmod(a, b, not(0))
-            prod0 := mul(a, b)
-            prod1 := sub(sub(mm, prod0), lt(mm, prod0))
-        }
-        if (prod1 == 0) {
-            return prod0 / denominator;
-        }
-        require(denominator > prod1, "MULDIV_OVERFLOW");
-        uint256 remainder;
-        assembly {
-            remainder := mulmod(a, b, denominator)
-            prod1 := sub(prod1, gt(remainder, prod0))
-            prod0 := sub(prod0, remainder)
-        }
-        uint256 twos = denominator & (~denominator + 1);
-        assembly {
-            denominator := div(denominator, twos)
-            prod0 := div(prod0, twos)
-            twos := add(div(sub(0, twos), twos), 1)
-        }
-        prod0 |= prod1 * twos;
-        uint256 inverse = (3 * denominator) ^ 2;
-        inverse *= 2 - denominator * inverse;
-        inverse *= 2 - denominator * inverse;
-        inverse *= 2 - denominator * inverse;
-        inverse *= 2 - denominator * inverse;
-        inverse *= 2 - denominator * inverse;
-        inverse *= 2 - denominator * inverse;
-        result = prod0 * inverse;
+        return BulldotV4Math.calculateSqrtPriceX96(amount0, amount1);
     }
 }
